@@ -10,3 +10,11 @@ egui-sharkplayer = { version = "0.5", default-features = false }
 rfd = "0.17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+statig = { version = "0.4", default-features = false, features = ["macro"] }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
+reqwest = { version = "0.13", features = ["stream"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+urlencoding = "2"

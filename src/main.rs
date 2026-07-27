@@ -1,22 +1,22 @@
+mod fsm;
+mod proxy;
+
 use eframe::{App, Frame, NativeOptions, egui};
 use egui_sharkplayer::{PlayerState, SharkPlayer};
+use fsm::{PersistentState, PlayerEvent, PlayerFsm};
+use proxy::Proxy;
 use rfd::FileDialog;
-use serde::{Deserialize, Serialize};
+use statig::blocking::StateMachine;
+use statig::prelude::*;
+use tracing::{debug, info, trace, warn};
 
 const APP_KEY: &str = "min_mpv_state";
-
-#[derive(Default, Serialize, Deserialize)]
-struct PersistentState {
-    recent_files: Vec<String>,
-}
+const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
 
 struct MinMpvApp {
-    player: PlayerState,
-    playlist: Vec<String>,
-    current_index: Option<usize>,
-    show_playlist: bool,
-    persistent: PersistentState,
-    status: String,
+    fsm: StateMachine<PlayerFsm>,
+    url_input: String,
+    show_url_dialog: bool,
 }
 
 impl MinMpvApp {
@@ -30,55 +30,62 @@ impl MinMpvApp {
             )) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
+        let proxy = match Proxy::start() {
+            Ok(p) => Some(p),
+            Err(e) => {
+                warn!("proxy not available, remote URLs will be disabled: {e}");
+                None
+            }
+        };
+
         let persistent: PersistentState = cc
             .storage
             .and_then(|s| s.get_string(APP_KEY))
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
 
-        Ok(Self {
+        let fsm = PlayerFsm {
             player,
+            proxy,
             playlist: Vec::new(),
             current_index: None,
             show_playlist: false,
             persistent,
-            status: String::from("Drop a video or press Cmd+O / Ctrl+O to open"),
-        })
-    }
-
-    fn load_path(&mut self, path: String) {
-        match self.player.load_file(&path) {
-            Ok(()) => {
-                self.status = format!("Loaded: {path}");
-                self.add_recent(path.clone());
-                if !self.playlist.contains(&path) {
-                    self.playlist.push(path.clone());
-                }
-                self.current_index = self.playlist.iter().position(|p| p == &path);
-            }
-            Err(e) => self.status = format!("Error loading {path}: {e}"),
+            status: String::from("Drop a video or press Ctrl/Cmd+O to open"),
         }
+        .state_machine();
+
+        let mut app = Self {
+            fsm,
+            url_input: String::new(),
+            show_url_dialog: false,
+        };
+        app.fsm.init();
+        info!("app initialized");
+        Ok(app)
     }
 
-    fn add_recent(&mut self, path: String) {
-        self.persistent.recent_files.retain(|p| p != &path);
-        self.persistent.recent_files.insert(0, path);
-        self.persistent.recent_files.truncate(10);
+    fn player_mut(&mut self) -> &mut PlayerState {
+        // SAFETY: we only mutate the player for rendering and cleanup; the state
+        // machine itself never holds a reference to the player.
+        unsafe { &mut self.fsm.inner_mut().player }
     }
 
-    fn open_file(&mut self) {
-        if let Some(path) = FileDialog::new()
-            .add_filter(
-                "Video files",
-                &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"],
-            )
+    fn status_mut(&mut self) -> &mut String {
+        // SAFETY: status is only mutated outside state machine handlers; it is not
+        // part of the state machine's invariants.
+        unsafe { &mut self.fsm.inner_mut().status }
+    }
+
+    fn open_file_dialog(&self) -> Option<PlayerEvent> {
+        FileDialog::new()
+            .add_filter("Video files", VIDEO_EXTS)
             .pick_file()
-        {
-            self.load_path(path.to_string_lossy().to_string());
-        }
+            .map(|p| PlayerEvent::OpenFile(p.to_string_lossy().to_string()))
     }
 
-    fn open_folder(&mut self) {
+    fn open_folder_dialog(&mut self) -> Vec<PlayerEvent> {
+        let mut events = Vec::new();
         if let Some(folder) = FileDialog::new().pick_folder() {
             let mut videos: Vec<String> = std::fs::read_dir(&folder)
                 .ok()
@@ -88,12 +95,7 @@ impl MinMpvApp {
                             e.path()
                                 .extension()
                                 .and_then(|ext| ext.to_str())
-                                .map(|ext| {
-                                    matches!(
-                                        ext.to_lowercase().as_str(),
-                                        "mp4" | "mkv" | "avi" | "mov" | "webm" | "ogv" | "flv"
-                                    )
-                                })
+                                .map(|ext| VIDEO_EXTS.contains(&ext.to_lowercase().as_str()))
                                 .unwrap_or(false)
                         })
                         .map(|e| e.path().to_string_lossy().to_string())
@@ -103,37 +105,19 @@ impl MinMpvApp {
             videos.sort();
 
             if !videos.is_empty() {
-                self.playlist.extend(videos.clone());
-                self.load_path(videos[0].clone());
+                let first = videos.remove(0);
+                events.push(PlayerEvent::OpenFile(first));
+                for v in videos {
+                    events.push(PlayerEvent::AddToPlaylist(vec![v]));
+                }
             } else {
-                self.status = "No video files found in folder".into();
+                *self.status_mut() = "No video files found in folder".into();
             }
         }
+        events
     }
 
-    fn play_index(&mut self, index: usize) {
-        if let Some(path) = self.playlist.get(index) {
-            self.load_path(path.clone());
-        }
-    }
-
-    fn next(&mut self) {
-        if let Some(i) = self.current_index {
-            if i + 1 < self.playlist.len() {
-                self.play_index(i + 1);
-            }
-        }
-    }
-
-    fn previous(&mut self) {
-        if let Some(i) = self.current_index {
-            if i > 0 {
-                self.play_index(i - 1);
-            }
-        }
-    }
-
-    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+    fn handle_dropped_files(&mut self, ctx: &egui::Context, events: &mut Vec<PlayerEvent>) {
         let dropped: Vec<_> = ctx.input(|i| {
             i.raw
                 .dropped_files
@@ -142,52 +126,99 @@ impl MinMpvApp {
                 .collect()
         });
         if let Some(first) = dropped.into_iter().next() {
-            self.load_path(first.to_string_lossy().to_string());
+            events.push(PlayerEvent::OpenFile(first.to_string_lossy().to_string()));
         }
     }
 
-    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command) {
-            self.open_file();
+    fn handle_shortcuts(&mut self, ctx: &egui::Context, events: &mut Vec<PlayerEvent>) {
+        if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift)
+        {
+            if let Some(e) = self.open_file_dialog() {
+                events.push(e);
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && i.modifiers.shift) {
+            events.extend(self.open_folder_dialog());
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::U) && i.modifiers.command) {
+            self.show_url_dialog = true;
         }
         if ctx.input(|i| i.key_pressed(egui::Key::P) && i.modifiers.command) {
-            self.show_playlist = !self.show_playlist;
+            events.push(PlayerEvent::TogglePlaylist);
         }
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) && i.modifiers.command) {
-            self.next();
+            events.push(PlayerEvent::Next);
         }
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft) && i.modifiers.command) {
-            self.previous();
+            events.push(PlayerEvent::Previous);
         }
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui) {
+    fn handle_url_dialog(&mut self, ui: &mut egui::Ui, events: &mut Vec<PlayerEvent>) {
+        if !self.show_url_dialog {
+            return;
+        }
+
+        let mut close = false;
+        egui::Window::new("Open URL")
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("URL:");
+                    ui.text_edit_singleline(&mut self.url_input);
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Load").clicked() && !self.url_input.trim().is_empty() {
+                        let url = self.url_input.trim().to_string();
+                        info!("user submitted URL: {url}");
+                        events.push(PlayerEvent::OpenUrl(url));
+                        close = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            });
+
+        if close {
+            self.show_url_dialog = false;
+            self.url_input.clear();
+        }
+    }
+
+    fn top_bar(&mut self, ui: &mut egui::Ui, events: &mut Vec<PlayerEvent>) {
         ui.horizontal(|ui| {
             if ui.button("Open File").clicked() {
-                self.open_file();
+                if let Some(e) = self.open_file_dialog() {
+                    events.push(e);
+                }
             }
             if ui.button("Open Folder").clicked() {
-                self.open_folder();
+                events.extend(self.open_folder_dialog());
+            }
+            if ui.button("Open URL").clicked() {
+                self.show_url_dialog = true;
             }
             ui.separator();
             if ui.button("Prev").clicked() {
-                self.previous();
+                events.push(PlayerEvent::Previous);
             }
             if ui.button("Next").clicked() {
-                self.next();
+                events.push(PlayerEvent::Next);
             }
             ui.separator();
             if ui.button("Playlist").clicked() {
-                self.show_playlist = !self.show_playlist;
+                events.push(PlayerEvent::TogglePlaylist);
             }
 
             ui.menu_button("Recent", |ui| {
-                if self.persistent.recent_files.is_empty() {
+                if self.fsm.persistent.recent_files.is_empty() {
                     ui.weak("No recent files");
                 } else {
-                    for path in self.persistent.recent_files.clone() {
+                    for path in self.fsm.persistent.recent_files.clone() {
                         if ui.button(truncate_path(&path)).clicked() {
-                            self.load_path(path);
+                            events.push(PlayerEvent::OpenFile(path));
                             ui.close();
                         }
                     }
@@ -195,24 +226,20 @@ impl MinMpvApp {
             });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add(egui::Label::new(&self.status).truncate());
+                ui.add(egui::Label::new(&self.fsm.status).truncate());
             });
         });
     }
 
-    fn playlist_panel(&mut self, ui: &mut egui::Ui) {
+    fn playlist_panel(&mut self, ui: &mut egui::Ui, events: &mut Vec<PlayerEvent>) {
         ui.label("Playlist");
         ui.separator();
         egui::ScrollArea::vertical().show(ui, |ui| {
-            let mut play_index = None;
-            for (i, path) in self.playlist.iter().enumerate() {
-                let selected = self.current_index == Some(i);
+            for (i, path) in self.fsm.playlist.iter().enumerate() {
+                let selected = self.fsm.current_index == Some(i);
                 if ui.selectable_label(selected, truncate_path(path)).clicked() {
-                    play_index = Some(i);
+                    events.push(PlayerEvent::SelectTrack(i));
                 }
-            }
-            if let Some(i) = play_index {
-                self.play_index(i);
             }
         });
     }
@@ -221,30 +248,41 @@ impl MinMpvApp {
 impl App for MinMpvApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
         let ctx = ui.ctx().clone();
-        self.handle_dropped_files(&ctx);
-        self.handle_shortcuts(&ctx);
+        let mut events = Vec::new();
+        self.handle_dropped_files(&ctx, &mut events);
+        self.handle_shortcuts(&ctx, &mut events);
+        self.handle_url_dialog(ui, &mut events);
 
         egui::Panel::top("top_bar").show(ui, |ui| {
-            self.top_bar(ui);
+            self.top_bar(ui, &mut events);
         });
 
-        if self.show_playlist {
+        if self.fsm.show_playlist {
             egui::Panel::left("playlist").show(ui, |ui| {
-                self.playlist_panel(ui);
+                self.playlist_panel(ui, &mut events);
             });
         }
 
+        events.push(PlayerEvent::Poll);
+        for event in events {
+            match event {
+                PlayerEvent::Poll => trace!("dispatching event: {event:?}"),
+                _ => debug!("dispatching event: {event:?}"),
+            }
+            self.fsm.handle(&event);
+        }
+
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.add(SharkPlayer::new(&mut self.player));
+            ui.add(SharkPlayer::new(self.player_mut()));
         });
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.player.destroy_gl_resources();
+        self.player_mut().destroy_gl_resources();
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        if let Ok(s) = serde_json::to_string(&self.persistent) {
+        if let Ok(s) = serde_json::to_string(&self.fsm.persistent) {
             storage.set_string(APP_KEY, s);
         }
     }
@@ -253,16 +291,18 @@ impl App for MinMpvApp {
 fn truncate_path(path: &str) -> String {
     let chars: Vec<char> = path.chars().collect();
     if chars.len() > 60 {
-        format!(
-            "...{}",
-            chars[chars.len() - 57..].iter().collect::<String>()
-        )
+        format!("...{}", chars[chars.len() - 57..].iter().collect::<String>())
     } else {
         path.to_string()
     }
 }
 
 fn main() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("min_mpv=debug"));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+    info!("starting min-mpv");
+
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([960.0, 640.0]),
         renderer: eframe::Renderer::Glow,

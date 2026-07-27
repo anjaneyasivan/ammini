@@ -1,21 +1,28 @@
+pub mod cache;
 pub mod client;
 pub mod config;
 pub mod panel;
+pub mod proxy;
 pub mod session;
 pub mod state_machine;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 pub use client::{DialogInfo, MessageInfo, PeerRef};
 pub use state_machine::{TelegramEvent, TelegramFsm, TelegramState};
 
+use cache::DocCacheManager;
 use client::TelegramClient;
 use config::TelegramConfig;
+use proxy::{start_server, ProxyState};
 
 /// Messages sent from the background thread to the UI.
 #[derive(Debug)]
 pub enum UiMessage {
+    /// The combined proxy server is ready. Contains the local port.
+    ProxyReady { port: u16 },
     NeedsAuth,
     AuthSuccess,
     CodeRequested,
@@ -53,6 +60,7 @@ pub enum BgCommand {
     PlayVideo(i32),
     StopVideo,
     SignOut,
+    ClearCache,
 }
 
 /// Start the Telegram background thread and return the command sender and UI receiver.
@@ -103,6 +111,34 @@ async fn run_telegram(
     let mut dialogs_iter: Option<client::DialogIter> = None;
     let mut messages_iter: Option<client::MessageIter> = None;
     let mut selected_chat_id: Option<i64> = None;
+
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("min-mpv")
+        .join("telegram_cache");
+    let cache_manager = Arc::new(tokio::sync::Mutex::new(DocCacheManager::new(cache_dir)));
+    let video_registry: Arc<tokio::sync::Mutex<HashMap<i32, client::VideoDownloadInfo>>> =
+        Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+
+    // Start the combined proxy server (remote URLs + Telegram videos).
+    let proxy_state = ProxyState {
+        reqwest_client: reqwest::Client::new(),
+        telegram_client: client.clone_inner(),
+        cache_manager: cache_manager.clone(),
+        video_registry: video_registry.clone(),
+    };
+
+    let proxy_port = match start_server(proxy_state).await {
+        Ok(port) => {
+            let _ = ui_tx.send(UiMessage::ProxyReady { port });
+            port
+        }
+        Err(e) => {
+            tracing::error!("failed to start proxy server: {e}");
+            let _ = ui_tx.send(UiMessage::Error(e.to_string()));
+            return;
+        }
+    };
 
     match client.is_authorized().await {
         Ok(true) => {
@@ -288,6 +324,7 @@ async fn run_telegram(
             BgCommand::SelectChat(peer_ref) => {
                 let chat_id = peer_ref.id.bot_api_dialog_id().unwrap_or(0);
                 selected_chat_id = Some(chat_id);
+                video_registry.lock().await.clear();
 
                 let mut iter = client.iter_messages(peer_ref);
                 match client::next_messages_page(
@@ -297,8 +334,14 @@ async fn run_telegram(
                 )
                 .await
                 {
-                    Ok((messages, _videos, has_more)) => {
+                    Ok((messages, videos, has_more)) => {
                         messages_iter = Some(iter);
+                        {
+                            let mut vr = video_registry.lock().await;
+                            for v in &videos {
+                                vr.insert(v.msg_id, v.clone());
+                            }
+                        }
                         let _ = ui_tx.send(UiMessage::MessagesPageLoaded {
                             messages,
                             has_more,
@@ -319,7 +362,13 @@ async fn run_telegram(
                     match client::next_messages_page(iter, client::MESSAGE_PAGE_SIZE, chat_id)
                         .await
                     {
-                        Ok((messages, _videos, has_more)) => {
+                        Ok((messages, videos, has_more)) => {
+                            {
+                                let mut vr = video_registry.lock().await;
+                                for v in &videos {
+                                    vr.insert(v.msg_id, v.clone());
+                                }
+                            }
                             let _ = ui_tx.send(UiMessage::MessagesPageLoaded {
                                 messages,
                                 has_more,
@@ -335,13 +384,77 @@ async fn run_telegram(
             BgCommand::BackToChatList => {
                 messages_iter = None;
                 selected_chat_id = None;
+                video_registry.lock().await.clear();
             }
             BgCommand::PlayVideo(msg_id) => {
-                tracing::debug!("telegram: PlayVideo requested for msg_id={msg_id} (not implemented)");
-                // ponytail: playback wiring deferred to the next pass.
-                let _ = ui_tx.send(UiMessage::VideoError(
-                    "Video playback is not yet implemented".to_string(),
-                ));
+                let video = {
+                    let vr = video_registry.lock().await;
+                    vr.get(&msg_id).cloned()
+                };
+                let video = match video {
+                    Some(v) => v,
+                    None => {
+                        let _ = ui_tx.send(UiMessage::VideoError(
+                            "Video not found in registry".to_string(),
+                        ));
+                        continue;
+                    }
+                };
+
+                let size = video.size as u64;
+                if size == 0 {
+                    let _ = ui_tx.send(UiMessage::VideoError(
+                        "Unknown video size".to_string(),
+                    ));
+                    continue;
+                }
+
+                let cache = {
+                    let mut cm = cache_manager.lock().await;
+                    match cm.get_or_create(video.chat_id, msg_id, size).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = ui_tx.send(UiMessage::VideoError(format!(
+                                "Cache error: {e}"
+                            )));
+                            continue;
+                        }
+                    }
+                };
+
+                // Spawn sequential background download to keep the cache ahead of playback.
+                let dl_client = client.clone_inner();
+                let dl_doc = video.document.clone();
+                let dl_cache = cache.clone();
+                let dl_msg_id = msg_id;
+                tokio::spawn(async move {
+                    tracing::info!("bg: starting download for msg_id={}", dl_msg_id);
+                    let mut iter = dl_client.iter_download(&dl_doc);
+                    let mut offset: u64 = 0;
+                    loop {
+                        let chunk = match iter.next().await {
+                            Ok(Some(c)) => c,
+                            Ok(None) => break,
+                            Err(e) => {
+                                tracing::error!("bg: download error msg_id={}: {}", dl_msg_id, e);
+                                break;
+                            }
+                        };
+                        if let Err(e) = dl_cache.write_at(offset, &chunk).await {
+                            tracing::error!("bg: cache write error msg_id={}: {}", dl_msg_id, e);
+                            break;
+                        }
+                        offset += chunk.len() as u64;
+                    }
+                    tracing::info!(
+                        "bg: download complete msg_id={} ({} bytes)",
+                        dl_msg_id,
+                        offset
+                    );
+                });
+
+                let url = format!("http://127.0.0.1:{}/telegram/{}", proxy_port, msg_id);
+                let _ = ui_tx.send(UiMessage::VideoReady { msg_id, url });
             }
             BgCommand::StopVideo => {
                 tracing::debug!("telegram: StopVideo (no-op)");
@@ -351,9 +464,14 @@ async fn run_telegram(
                 dialogs_iter = None;
                 messages_iter = None;
                 selected_chat_id = None;
+                video_registry.lock().await.clear();
                 login_token = None;
                 password_token = None;
                 let _ = ui_tx.send(UiMessage::NeedsAuth);
+            }
+            BgCommand::ClearCache => {
+                tracing::info!("telegram: clearing video cache");
+                cache_manager.lock().await.clear();
             }
         }
     }

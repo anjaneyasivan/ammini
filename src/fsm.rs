@@ -1,7 +1,7 @@
 use statig::prelude::*;
 use tracing::{error, info};
 
-use crate::proxy::Proxy;
+use crate::proxy::local_url_for;
 use egui_sharkplayer::PlayerState;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ pub struct PersistentState {
 
 pub struct PlayerFsm {
     pub player: PlayerState,
-    pub proxy: Option<Proxy>,
+    pub proxy_url: Option<String>,
     pub playlist: Vec<String>,
     pub current_index: Option<usize>,
     pub show_playlist: bool,
@@ -24,6 +24,7 @@ pub struct PlayerFsm {
 pub enum PlayerEvent {
     OpenFile(String),
     OpenUrl(String),
+    OpenTelegramUrl(String),
     AddToPlaylist(Vec<String>),
     SelectTrack(usize),
     Next,
@@ -118,8 +119,8 @@ impl PlayerFsm {
                 load_media(self, path.clone())
             }
             PlayerEvent::OpenUrl(url) => {
-                if let Some(proxy) = &self.proxy {
-                    let local = proxy.local_url_for(url);
+                if let Some(proxy_url) = &self.proxy_url {
+                    let local = local_url_for(proxy_url, url);
                     if !self.playlist.contains(&local) {
                         self.playlist.push(local.clone());
                     }
@@ -130,6 +131,13 @@ impl PlayerFsm {
                     self.status = "Remote URL playback unavailable".into();
                     Transition(FsmState::error())
                 }
+            }
+            PlayerEvent::OpenTelegramUrl(url) => {
+                if !self.playlist.contains(url) {
+                    self.playlist.push(url.clone());
+                }
+                self.current_index = Some(self.playlist.len() - 1);
+                load_media(self, url.clone())
             }
             PlayerEvent::AddToPlaylist(paths) => {
                 for p in paths {

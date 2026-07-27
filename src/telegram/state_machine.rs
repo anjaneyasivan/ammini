@@ -36,6 +36,12 @@ pub enum TelegramEvent {
     Error(String),
     /// Reset from error state back to the phone-entry form.
     ResetAuth,
+    /// A Telegram video started loading.
+    VideoLoading(i32),
+    /// A Telegram video is ready to play.
+    VideoReady,
+    /// A Telegram video failed to prepare.
+    VideoError(String),
 }
 
 /// Data held by the Telegram state machine.
@@ -52,6 +58,8 @@ pub struct TelegramData {
     pub selected_chat_name: Option<String>,
     pub has_more_dialogs: bool,
     pub has_more_messages: bool,
+    pub loading_video: bool,
+    pub current_video: Option<i32>,
 }
 
 impl TelegramData {
@@ -244,10 +252,28 @@ impl TelegramFsm {
                 self.data.update_messages(messages, *has_more, *replace);
                 Handled
             }
+            TelegramEvent::VideoLoading(msg_id) => {
+                self.data.loading_video = true;
+                self.data.current_video = Some(*msg_id);
+                self.data.error = None;
+                Handled
+            }
+            TelegramEvent::VideoReady => {
+                self.data.loading_video = false;
+                Handled
+            }
+            TelegramEvent::VideoError(msg) => {
+                self.data.loading_video = false;
+                self.data.error = Some(msg.clone());
+                Handled
+            }
             TelegramEvent::BackToChatList => {
                 self.data.messages.clear();
                 self.data.selected_chat = None;
                 self.data.selected_chat_name = None;
+                self.data.loading_video = false;
+                self.data.current_video = None;
+                self.data.error = None;
                 Transition(TelegramState::chat_list())
             }
             TelegramEvent::SignOut | TelegramEvent::NeedsAuth => {
@@ -294,9 +320,10 @@ pub fn ui_message_to_event(msg: &crate::telegram::UiMessage) -> Option<TelegramE
             replace,
         } => TelegramEvent::MessagesLoaded(messages.clone(), *has_more, *replace),
         UiMessage::Error(e) => TelegramEvent::Error(e.clone()),
-        UiMessage::VideoError(e) => TelegramEvent::Error(e.clone()),
-        UiMessage::VideoReady { .. } => {
-            // Video playback is not wired yet.
+        UiMessage::VideoError(e) => TelegramEvent::VideoError(e.clone()),
+        UiMessage::VideoReady { .. } => TelegramEvent::VideoReady,
+        UiMessage::ProxyReady { .. } => {
+            // The UI uses the proxy port directly; no state change needed.
             return None;
         }
     })

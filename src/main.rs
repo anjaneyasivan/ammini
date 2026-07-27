@@ -5,13 +5,12 @@ mod telegram;
 use eframe::{App, Frame, NativeOptions, egui};
 use egui_sharkplayer::{PlayerState, SharkPlayer};
 use fsm::{PersistentState, PlayerEvent, PlayerFsm};
-use proxy::Proxy;
 use rfd::FileDialog;
 use statig::blocking::StateMachine;
 use statig::prelude::*;
 use telegram::config::TelegramConfig;
 use telegram::panel::TelegramPanel;
-use telegram::state_machine::TelegramFsm;
+use telegram::state_machine::{TelegramEvent, TelegramFsm};
 use telegram::{BgCommand, UiMessage, start};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, info, trace, warn};
@@ -43,14 +42,6 @@ impl MinMpvApp {
             )) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
-        let proxy = match Proxy::start() {
-            Ok(p) => Some(p),
-            Err(e) => {
-                warn!("proxy not available, remote URLs will be disabled: {e}");
-                None
-            }
-        };
-
         let persistent: PersistentState = cc
             .storage
             .and_then(|s| s.get_string(APP_KEY))
@@ -59,7 +50,7 @@ impl MinMpvApp {
 
         let fsm = PlayerFsm {
             player,
-            proxy,
+            proxy_url: None,
             playlist: Vec::new(),
             current_index: None,
             show_playlist: false,
@@ -90,6 +81,12 @@ impl MinMpvApp {
         // SAFETY: we only mutate the player for rendering and cleanup; the state
         // machine itself never holds a reference to the player.
         unsafe { &mut self.fsm.inner_mut().player }
+    }
+
+    fn proxy_url_mut(&mut self) -> &mut Option<String> {
+        // SAFETY: proxy_url is only mutated outside state machine handlers; it is not
+        // part of the state machine's invariants.
+        unsafe { &mut self.fsm.inner_mut().proxy_url }
     }
 
     fn status_mut(&mut self) -> &mut String {
@@ -279,8 +276,24 @@ impl App for MinMpvApp {
 
         while let Ok(msg) = self.ui_rx.try_recv() {
             trace!("telegram ui message: {msg:?}");
-            if let Some(event) = telegram::state_machine::ui_message_to_event(&msg) {
-                self.telegram_fsm.handle(&event);
+            match msg {
+                UiMessage::ProxyReady { port } => {
+                    let url = format!("http://127.0.0.1:{port}");
+                    info!("proxy ready at {url}");
+                    *self.proxy_url_mut() = Some(url);
+                }
+                UiMessage::VideoReady { msg_id: _, url } => {
+                    self.telegram_fsm.handle(&TelegramEvent::VideoReady);
+                    events.push(PlayerEvent::OpenTelegramUrl(url));
+                }
+                UiMessage::VideoError(e) => {
+                    self.telegram_fsm.handle(&TelegramEvent::VideoError(e));
+                }
+                other => {
+                    if let Some(event) = telegram::state_machine::ui_message_to_event(&other) {
+                        self.telegram_fsm.handle(&event);
+                    }
+                }
             }
         }
 

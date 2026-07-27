@@ -92,6 +92,10 @@ impl TelegramClient {
         self.client.iter_messages(peer)
     }
 
+    pub fn clone_inner(&self) -> Client {
+        self.client.clone()
+    }
+
     pub fn inner(&self) -> &Client {
         &self.client
     }

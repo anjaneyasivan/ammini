@@ -228,6 +228,10 @@ impl TelegramPanel {
         if ui.button("Sign out").clicked() {
             Self::send(bg, BgCommand::SignOut);
         }
+        if ui.button("Clear video cache").clicked() {
+            Self::send(bg, BgCommand::ClearCache);
+            self.show_toast("Telegram video cache cleared");
+        }
     }
 
     fn message_list_ui(
@@ -249,7 +253,14 @@ impl TelegramPanel {
         });
         ui.separator();
 
-        let mut play_clicked = false;
+        if let Some(err) = &fsm.data.error {
+            if !err.trim().is_empty() {
+                ui.colored_label(egui::Color32::RED, err);
+                ui.separator();
+            }
+        }
+
+        let mut clicked_msg_id: Option<i32> = None;
         let mut load_more_clicked = false;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for msg in &fsm.data.messages {
@@ -265,8 +276,15 @@ impl TelegramPanel {
                     ui.label(&msg.text);
                 }
                 if msg.has_video {
-                    if ui.button("▶ Play").clicked() {
-                        play_clicked = true;
+                    let is_loading =
+                        fsm.data.loading_video && fsm.data.current_video == Some(msg.id);
+                    if is_loading {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Loading video…");
+                        });
+                    } else if ui.button("▶ Play").clicked() {
+                        clicked_msg_id = Some(msg.id);
                     }
                 }
                 ui.separator();
@@ -276,8 +294,9 @@ impl TelegramPanel {
             }
         });
 
-        if play_clicked {
-            self.show_toast("Video playback through Telegram is not yet implemented");
+        if let Some(msg_id) = clicked_msg_id {
+            fsm.handle(&TelegramEvent::VideoLoading(msg_id));
+            Self::send(bg, BgCommand::PlayVideo(msg_id));
         }
         if load_more_clicked {
             Self::send(bg, BgCommand::LoadMoreMessages);

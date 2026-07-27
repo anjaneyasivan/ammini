@@ -1,5 +1,6 @@
 mod fsm;
 mod proxy;
+mod telegram;
 
 use eframe::{App, Frame, NativeOptions, egui};
 use egui_sharkplayer::{PlayerState, SharkPlayer};
@@ -8,6 +9,11 @@ use proxy::Proxy;
 use rfd::FileDialog;
 use statig::blocking::StateMachine;
 use statig::prelude::*;
+use telegram::config::TelegramConfig;
+use telegram::panel::TelegramPanel;
+use telegram::state_machine::TelegramFsm;
+use telegram::{BgCommand, UiMessage, start};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, info, trace, warn};
 
 const APP_KEY: &str = "min_mpv_state";
@@ -17,11 +23,18 @@ struct MinMpvApp {
     fsm: StateMachine<PlayerFsm>,
     url_input: String,
     show_url_dialog: bool,
+    telegram_fsm: StateMachine<TelegramFsm>,
+    telegram_panel: TelegramPanel,
+    show_telegram: bool,
+    bg_tx: Option<UnboundedSender<BgCommand>>,
+    ui_rx: UnboundedReceiver<UiMessage>,
 }
 
 impl MinMpvApp {
     fn new(
         cc: &eframe::CreationContext<'_>,
+        bg_tx: Option<UnboundedSender<BgCommand>>,
+        ui_rx: UnboundedReceiver<UiMessage>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let player = PlayerState::new(cc).map_err(|e| {
             Box::new(std::io::Error::new(
@@ -55,10 +68,18 @@ impl MinMpvApp {
         }
         .state_machine();
 
+        let mut telegram_fsm = TelegramFsm::new().state_machine();
+        telegram_fsm.init();
+
         let mut app = Self {
             fsm,
             url_input: String::new(),
             show_url_dialog: false,
+            telegram_fsm,
+            telegram_panel: TelegramPanel::new(),
+            show_telegram: false,
+            bg_tx,
+            ui_rx,
         };
         app.fsm.init();
         info!("app initialized");
@@ -146,6 +167,9 @@ impl MinMpvApp {
         if ctx.input(|i| i.key_pressed(egui::Key::P) && i.modifiers.command) {
             events.push(PlayerEvent::TogglePlaylist);
         }
+        if ctx.input(|i| i.key_pressed(egui::Key::T) && i.modifiers.command) {
+            self.show_telegram = !self.show_telegram;
+        }
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) && i.modifiers.command) {
             events.push(PlayerEvent::Next);
         }
@@ -211,6 +235,9 @@ impl MinMpvApp {
             if ui.button("Playlist").clicked() {
                 events.push(PlayerEvent::TogglePlaylist);
             }
+            if ui.button("Telegram").clicked() {
+                self.show_telegram = !self.show_telegram;
+            }
 
             ui.menu_button("Recent", |ui| {
                 if self.fsm.persistent.recent_files.is_empty() {
@@ -249,6 +276,14 @@ impl App for MinMpvApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
         let ctx = ui.ctx().clone();
         let mut events = Vec::new();
+
+        while let Ok(msg) = self.ui_rx.try_recv() {
+            trace!("telegram ui message: {msg:?}");
+            if let Some(event) = telegram::state_machine::ui_message_to_event(&msg) {
+                self.telegram_fsm.handle(&event);
+            }
+        }
+
         self.handle_dropped_files(&ctx, &mut events);
         self.handle_shortcuts(&ctx, &mut events);
         self.handle_url_dialog(ui, &mut events);
@@ -257,10 +292,21 @@ impl App for MinMpvApp {
             self.top_bar(ui, &mut events);
         });
 
-        if self.fsm.show_playlist {
-            egui::Panel::left("playlist").show(ui, |ui| {
-                self.playlist_panel(ui, &mut events);
-            });
+        if self.fsm.show_playlist || self.show_telegram {
+            egui::Panel::left("side_panel")
+                .default_size(280.0)
+                .show(ui, |ui| {
+                    if self.show_telegram {
+                        self.telegram_panel
+                            .ui(ui, &mut self.telegram_fsm, &self.bg_tx);
+                    }
+                    if self.fsm.show_playlist && self.show_telegram {
+                        ui.separator();
+                    }
+                    if self.fsm.show_playlist {
+                        self.playlist_panel(ui, &mut events);
+                    }
+                });
         }
 
         events.push(PlayerEvent::Poll);
@@ -303,6 +349,21 @@ fn main() {
     tracing_subscriber::fmt().with_env_filter(filter).init();
     info!("starting min-mpv");
 
+    let telegram_config = match TelegramConfig::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "Failed to load Telegram configuration: {}\n\n\
+                 Copy .env.example to .env and fill in your TELEGRAM_API_ID and \
+                 TELEGRAM_API_HASH from https://my.telegram.org/apps",
+                e
+            );
+            std::process::exit(1);
+        }
+    };
+
+    let (bg_tx, ui_rx) = start(telegram_config);
+
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([960.0, 640.0]),
         renderer: eframe::Renderer::Glow,
@@ -312,8 +373,8 @@ fn main() {
     eframe::run_native(
         "min-mpv",
         options,
-        Box::new(|cc| {
-            let app = MinMpvApp::new(cc)?;
+        Box::new(move |cc| {
+            let app = MinMpvApp::new(cc, Some(bg_tx), ui_rx)?;
             Ok(Box::new(app) as Box<dyn App>)
         }),
     )

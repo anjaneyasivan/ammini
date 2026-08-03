@@ -1,19 +1,15 @@
-mod fsm;
-mod proxy;
-mod telegram;
-
 use eframe::{App, Frame, NativeOptions, egui};
 use egui_sharkplayer::{PlayerState, SharkPlayer};
-use fsm::{PersistentState, PlayerEvent, PlayerFsm};
+use min_mpv::fsm::{PersistentState, PlayerEvent, PlayerFsm};
+use min_mpv::telegram::config::TelegramConfig;
+use min_mpv::telegram::panel::TelegramPanel;
+use min_mpv::telegram::state_machine::{TelegramEvent, TelegramFsm};
+use min_mpv::telegram::{BgCommand, UiMessage, start};
 use rfd::FileDialog;
 use statig::blocking::StateMachine;
 use statig::prelude::*;
-use telegram::config::TelegramConfig;
-use telegram::panel::TelegramPanel;
-use telegram::state_machine::{TelegramEvent, TelegramFsm};
-use telegram::{BgCommand, UiMessage, start};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, trace};
 
 const APP_KEY: &str = "min_mpv_state";
 const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
@@ -290,7 +286,7 @@ impl App for MinMpvApp {
                     self.telegram_fsm.handle(&TelegramEvent::VideoError(e));
                 }
                 other => {
-                    if let Some(event) = telegram::state_machine::ui_message_to_event(&other) {
+                    if let Some(event) = min_mpv::telegram::state_machine::ui_message_to_event(&other) {
                         self.telegram_fsm.handle(&event);
                     }
                 }

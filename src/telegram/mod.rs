@@ -123,9 +123,9 @@ async fn run_telegram(
     // Start the combined proxy server (remote URLs + Telegram videos).
     let proxy_state = ProxyState {
         reqwest_client: reqwest::Client::new(),
-        telegram_client: client.clone_inner(),
         cache_manager: cache_manager.clone(),
         video_registry: video_registry.clone(),
+        telegram_client: Some(client.clone_inner()),
     };
 
     let proxy_port = match start_server(proxy_state).await {

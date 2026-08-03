@@ -249,6 +249,51 @@ fn extract_video(
     )
 }
 
+/// Returns true if the filename or MIME type suggests HEVC/H.265 content.
+pub fn is_hevc_video(video: &VideoDownloadInfo) -> bool {
+    let name_hevc = video
+        .document
+        .name()
+        .map(|n| n.to_lowercase().contains("hevc"))
+        .unwrap_or(false);
+    let mime_hevc = video
+        .document
+        .mime_type()
+        .map(|m| m.to_lowercase().contains("hevc") || m.to_lowercase().contains("h265"))
+        .unwrap_or(false);
+    name_hevc || mime_hevc
+}
+
+/// Search all dialogs for the first message containing an HEVC video.
+/// Returns `Ok(None)` if authorized but no HEVC video was found.
+pub async fn find_first_hevc_video(
+    client: &TelegramClient,
+) -> Result<Option<VideoDownloadInfo>> {
+    let mut dialogs_iter = client.iter_dialogs();
+    loop {
+        let (dialogs, has_more_dialogs) =
+            next_dialogs_page(&mut dialogs_iter, DIALOG_PAGE_SIZE).await?;
+        for dialog in dialogs {
+            let chat_id = dialog.peer_ref.id.bot_api_dialog_id().unwrap_or(0);
+            let mut messages_iter = client.iter_messages(dialog.peer_ref);
+            loop {
+                let (_, videos, has_more_messages) =
+                    next_messages_page(&mut messages_iter, MESSAGE_PAGE_SIZE, chat_id).await?;
+                if let Some(video) = videos.into_iter().find(is_hevc_video) {
+                    return Ok(Some(video));
+                }
+                if !has_more_messages {
+                    break;
+                }
+            }
+        }
+        if !has_more_dialogs {
+            break;
+        }
+    }
+    Ok(None)
+}
+
 /// ponytail: formats as local time HH:MM, no date. Fine for a chat view;
 /// add date separators if the thread spans multiple days.
 fn format_datetime(dt: &chrono::DateTime<chrono::Utc>) -> String {

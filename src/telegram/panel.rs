@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedSender;
 use eframe::egui;
 
-use crate::telegram::{BgCommand, PeerRef};
+use crate::telegram::{BgCommand};
 use crate::telegram::state_machine::{TelegramData, TelegramEvent, TelegramFsm, TelegramState};
 use statig::blocking::StateMachine;
 

@@ -12,7 +12,8 @@ pub struct DocCache {
     file: File,
     total_size: u64,
     downloaded: Mutex<RangeSet<u64>>,
-    fetch_watermark: watch::Sender<u64>,
+    /// Bumped every time bytes are written so waiters can poll for their range.
+    download_notify: watch::Sender<u64>,
     path: PathBuf,
 }
 
@@ -43,7 +44,7 @@ impl DocCache {
             file,
             total_size,
             downloaded: Mutex::new(RangeSet::new()),
-            fetch_watermark: sender,
+            download_notify: sender,
             path,
         });
 
@@ -61,14 +62,48 @@ impl DocCache {
         downloaded.contains(&start) && downloaded.contains(&(end - 1))
     }
 
+    /// Wait until every byte in [start, end) has been written.
+    pub async fn wait_for_range(&self, start: u64, end: u64) -> Result<()> {
+        if start >= end {
+            return Ok(());
+        }
+        let mut receiver = self.download_notify.subscribe();
+        loop {
+            if self.is_range_downloaded(start, end - 1).await {
+                return Ok(());
+            }
+            receiver.changed().await.context("Download channel closed")?;
+        }
+    }
+
+    /// How many bytes are contiguously available starting at `start`, up to and including `end`.
+    pub async fn contiguous_available_from(&self, start: u64, end: u64) -> u64 {
+        let downloaded = self.downloaded.lock().await;
+        let max_end = end + 1;
+        let mut pos = start;
+        for range in downloaded.iter() {
+            if range.end <= pos {
+                continue;
+            }
+            if range.start > pos {
+                break;
+            }
+            pos = range.end.min(max_end);
+            if pos == max_end {
+                break;
+            }
+        }
+        pos - start
+    }
+
     pub fn watermark(&self) -> u64 {
-        *self.fetch_watermark.borrow()
+        *self.download_notify.borrow()
     }
 
     pub async fn wait_for_watermark(&self, target: u64) -> Result<()> {
-        let mut receiver = self.fetch_watermark.subscribe();
+        let mut receiver = self.download_notify.subscribe();
         loop {
-            if *receiver.borrow_and_update() >= target {
+            if self.contiguous_watermark().await >= target {
                 return Ok(());
             }
             receiver
@@ -76,6 +111,19 @@ impl DocCache {
                 .await
                 .context("Watermark channel closed")?;
         }
+    }
+
+    async fn contiguous_watermark(&self) -> u64 {
+        let downloaded = self.downloaded.lock().await;
+        let mut watermark = 0;
+        for range in downloaded.iter() {
+            if range.start <= watermark {
+                watermark = watermark.max(range.end);
+            } else {
+                break;
+            }
+        }
+        watermark
     }
 
     pub async fn write_at(&self, offset: u64, data: &[u8]) -> Result<()> {
@@ -86,10 +134,9 @@ impl DocCache {
         let mut downloaded = self.downloaded.lock().await;
         downloaded.insert(offset..offset + data.len() as u64);
 
-        let new_end = offset + data.len() as u64;
-        if new_end > *self.fetch_watermark.borrow() {
-            self.fetch_watermark.send_replace(new_end);
-        }
+        // Notify waiters that new data is available. The generation counter itself has no meaning;
+        // it just wakes up wait_for_range / wait_for_watermark so they can re-check.
+        self.download_notify.send_modify(|n| *n += 1);
 
         Ok(())
     }
@@ -153,6 +200,3 @@ impl DocCacheManager {
         }
     }
 }
-
-// Import AsyncReadExt for DocCache::read_at.
-use tokio::io::AsyncReadExt;

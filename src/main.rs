@@ -31,6 +31,10 @@ impl MinMpvApp {
         bg_tx: Option<UnboundedSender<BgCommand>>,
         ui_rx: UnboundedReceiver<UiMessage>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Install the custom font stack (modern emoji + system script fallbacks) before
+        // any UI is drawn.
+        min_mpv::fonts::install(&cc.egui_ctx);
+
         let player = PlayerState::new(cc).map_err(|e| {
             Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,

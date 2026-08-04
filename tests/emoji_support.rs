@@ -40,6 +40,25 @@ fn bundled_emoji_font_covers_common_and_modern_emojis() {
 }
 
 #[test]
+fn bundled_dejavu_sans_covers_symbols_and_arrows() {
+    let (defs, chars) = covered_chars();
+
+    assert!(
+        defs.font_data.contains_key("DejaVuSans"),
+        "bundled DejaVu Sans missing from font definitions"
+    );
+
+    // Dingbats/arrows the emoji font doesn't cover (e.g. `➠` seen in real chats).
+    for c in ['➠', '➢', '➥', '✔', '✖', '➔', '⟶'] {
+        let by = chars.get(&c).unwrap_or_else(|| panic!("no glyph for {c}"));
+        assert!(
+            by.iter().any(|f| f == "DejaVuSans"),
+            "{c} not covered by DejaVuSans: {by:?}"
+        );
+    }
+}
+
+#[test]
 fn script_fallbacks_cover_when_host_provides_them() {
     let (defs, chars) = covered_chars();
     let loaded: HashSet<&str> = defs.font_data.keys().map(String::as_str).collect();

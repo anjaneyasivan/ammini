@@ -1,6 +1,7 @@
 //! Custom font stack for the app: a modern monochrome emoji font (the egui defaults are
-//! years out of date and miss most emojis found in real chats) plus best-effort system
-//! fonts as fallbacks for non-Latin scripts (Devanagari, Arabic, Thai, …).
+//! years out of date and miss most emojis found in real chats), a bundled DejaVu Sans for
+//! symbols/dingbats/arrows the emoji font lacks, plus best-effort system fonts as
+//! fallbacks for non-Latin scripts (Devanagari, Arabic, Thai, …).
 
 use std::sync::Arc;
 
@@ -12,6 +13,13 @@ use eframe::egui;
 /// Source: google/fonts `ofl/notoemoji`, SIL Open Font License 1.1
 /// (see `assets/fonts/OFL-NotoEmoji.txt`).
 const NOTO_EMOJI: &[u8] = include_bytes!("../assets/fonts/NotoEmoji-Variable.ttf");
+
+/// DejaVu Sans, bundled for symbols that the emoji font doesn't cover (e.g. Dingbats like
+/// `➠`, arrows, check marks). Also acts as a broad Latin/Cyrillic/Greek fallback on every
+/// platform, not just Linux.
+///
+/// Source: dejavu-fonts 2.37, `ttf/DejaVuSans.ttf` (see `assets/fonts/LICENSE-DejaVu.txt`).
+const DEJA_VU_SANS: &[u8] = include_bytes!("../assets/fonts/DejaVuSans.ttf");
 
 /// System fonts tried as script fallbacks, one entry per script. macOS entries are kept
 /// small (< 5 MB): the big ones (PingFang.ttc ~78 MB, Arial Unicode ~23 MB) are skipped
@@ -38,8 +46,6 @@ const SYSTEM_FALLBACKS: &[(&str, &str, u32)] = &[
     ("Khmer", "/System/Library/Fonts/Supplemental/Khmer Sangam MN.ttf", 0),
     ("Lao", "/System/Library/Fonts/Supplemental/Lao MN.ttc", 0),
     ("Thai", "/System/Library/Fonts/Supplemental/Thonburi.ttc", 0),
-    // Broad Latin/Cyrillic/Greek fallback on Linux.
-    ("DejaVuSans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 0),
     // Linux CJK (Noto Sans CJK). Paths vary by distro; only one will exist.
     ("NotoCJK", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),
     ("NotoCJKAlt", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", 0),
@@ -60,8 +66,11 @@ pub fn font_definitions() -> egui::FontDefinitions {
             }),
         ),
     );
+    defs.font_data.insert("DejaVuSans".to_owned(), Arc::new(egui::FontData::from_static(DEJA_VU_SANS)));
 
-    let mut fallbacks: Vec<String> = vec!["NotoEmoji".to_owned()];
+    // DejaVu Sans sits right after the emoji font: it picks up symbols/arrows/dingbats
+    // the emoji font doesn't cover, before egui's (outdated) builtins or script fallbacks.
+    let mut fallbacks: Vec<String> = vec!["NotoEmoji".to_owned(), "DejaVuSans".to_owned()];
     for (name, path, index) in SYSTEM_FALLBACKS {
         match std::fs::read(path) {
             Ok(bytes) => {

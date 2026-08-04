@@ -282,7 +282,8 @@ impl App for MinMpvApp {
                     info!("proxy ready at {url}");
                     *self.proxy_url_mut() = Some(url);
                 }
-                UiMessage::VideoReady { msg_id: _, url } => {
+                UiMessage::VideoReady { msg_id, url } => {
+                    info!("telegram: video ready msg_id={msg_id} url={url}");
                     self.telegram_fsm.handle(&TelegramEvent::VideoReady);
                     events.push(PlayerEvent::OpenTelegramUrl(url));
                 }

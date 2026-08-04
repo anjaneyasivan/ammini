@@ -233,6 +233,13 @@ impl TelegramPanel {
         let mut clicked_msg_id: Option<i32> = None;
         let mut load_more_clicked = false;
         egui::ScrollArea::vertical().show(ui, |ui| {
+            // Older messages load above the current ones, so the button lives at the top.
+            if fsm.data.has_more_messages {
+                if ui.button("Load older messages").clicked() {
+                    load_more_clicked = true;
+                }
+                ui.separator();
+            }
             for msg in &fsm.data.messages {
                 ui.horizontal(|ui| {
                     if !msg.sender.is_empty() {
@@ -258,9 +265,6 @@ impl TelegramPanel {
                     }
                 }
                 ui.separator();
-            }
-            if fsm.data.has_more_messages && ui.button("Load older messages").clicked() {
-                load_more_clicked = true;
             }
         });
 

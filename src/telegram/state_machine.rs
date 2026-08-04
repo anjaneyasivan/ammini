@@ -328,3 +328,78 @@ pub fn ui_message_to_event(msg: &crate::telegram::UiMessage) -> Option<TelegramE
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{TelegramData, TelegramEvent, TelegramFsm, TelegramState, ui_message_to_event};
+    use crate::telegram::UiMessage;
+    use crate::telegram::client::{DialogInfo, MessageInfo, PeerRef};
+    use grammers_session::types::{PeerAuth, PeerId};
+    use statig::prelude::IntoStateMachineExt;
+
+    fn msg(id: i32) -> MessageInfo {
+        MessageInfo {
+            id,
+            sender: String::new(),
+            text: format!("msg {id}"),
+            time: String::new(),
+            has_video: false,
+        }
+    }
+
+    fn peer_ref(id: i64) -> PeerRef {
+        PeerRef {
+            id: PeerId::from_bot_api_dialog_id(id).unwrap(),
+            auth: PeerAuth::from_hash(0),
+        }
+    }
+
+    #[test]
+    fn pages_store_messages_oldest_first() {
+        let mut data = TelegramData::default();
+
+        // API returns newest-first; the first (fresh) page is stored oldest-first.
+        data.update_messages(&[msg(3), msg(2), msg(1)], true, true);
+        let ids: Vec<i32> = data.messages.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec![1, 2, 3], "stored oldest-first for display");
+
+        // An older page arrives newest-first ([5, 4]); it is reversed and prepended
+        // above the current messages.
+        data.update_messages(&[msg(5), msg(4)], true, false);
+        let ids: Vec<i32> = data.messages.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec![4, 5, 1, 2, 3], "older messages prepended, oldest first");
+    }
+
+    #[test]
+    fn startup_sequence_populates_dialogs_then_messages() {
+        let mut fsm = TelegramFsm::new().state_machine();
+        fsm.init();
+
+        // Replays the startup sequence: already authorized, then a page of dialogs.
+        fsm.handle(&ui_message_to_event(&UiMessage::AuthSuccess).unwrap());
+        let dialogs: Vec<DialogInfo> = (0..20)
+            .map(|i| DialogInfo {
+                peer_ref: peer_ref(i + 1),
+                name: format!("Chat {i}"),
+                last_message: None,
+            })
+            .collect();
+        fsm.handle(&TelegramEvent::DialogsLoaded(dialogs.clone(), true, true));
+
+        assert!(matches!(fsm.state(), TelegramState::ChatList {}));
+        assert_eq!(fsm.data.dialogs.len(), 20, "20 dialogs must reach the UI");
+
+        // Open a chat: it transitions to the message list and remembers the name.
+        fsm.handle(&TelegramEvent::ChatSelected(dialogs[0].peer_ref));
+        assert!(matches!(fsm.state(), TelegramState::MessageList {}));
+        assert_eq!(fsm.data.selected_chat_name.as_deref(), Some("Chat 0"));
+
+        // The fetched page arrives and populates the messages.
+        fsm.handle(&TelegramEvent::MessagesLoaded(
+            vec![msg(3), msg(2), msg(1)],
+            true,
+            true,
+        ));
+        assert_eq!(fsm.data.messages.len(), 3);
+    }
+}

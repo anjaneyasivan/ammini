@@ -20,11 +20,10 @@
 - The bg thread keeps `video_registry: HashMap<i32, VideoDownloadInfo>` (msg_id → document) that the proxy reads to stream; cleared on chat switch/sign-out.
 
 ## Testing
-- Fast offline suite: `cargo test --lib --test emoji_support` (unit tests in `client.rs`/`proxy.rs` + font-coverage test).
+- Fast offline suite: `cargo test --lib` (unit tests in `client.rs`/`proxy.rs`/`state_machine.rs`).
 - `tests/hevc_proxy.rs` is a live-Telegram integration test. It auto-skips (prints "Skipping test…") when env config, an authorized session, or an HEVC video is missing, but it panics on some real failures and can be slow (scans all dialogs/messages; tail range request has a 120s timeout). A plain `cargo test` includes it — run it deliberately with `cargo test --test hevc_proxy`.
 - Telegram session: SQLite at `dirs::data_local_dir()/min-mpv/telegram.session` (macOS: `~/Library/Application Support/min-mpv/telegram.session`), auto-persisted. UI "Sign out" clears in-memory state but does NOT delete the file (`session::delete_session()` exists but is unwired).
 - Recent-files UI state persists via eframe storage key `min_mpv_state`.
 
 ## Gotchas
-- Fonts (`src/fonts.rs`): bundled NotoEmoji + best-effort macOS system fallbacks are injected at startup. egui panics at startup if any registered font fails to parse — only add fonts known to load; `tests/emoji_support.rs` is the safety net for this.
 - Shortcuts not in the README: `Cmd+U` opens the URL dialog, `Cmd+T` toggles the Telegram panel.

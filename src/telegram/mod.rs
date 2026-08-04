@@ -1,4 +1,3 @@
-pub mod cache;
 pub mod client;
 pub mod config;
 pub mod panel;
@@ -13,7 +12,6 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 pub use client::{DialogInfo, MessageInfo, PeerRef};
 pub use state_machine::{TelegramEvent, TelegramFsm, TelegramState};
 
-use cache::DocCacheManager;
 use client::TelegramClient;
 use config::TelegramConfig;
 use proxy::{start_server, ProxyState};
@@ -60,7 +58,6 @@ pub enum BgCommand {
     PlayVideo(i32),
     StopVideo,
     SignOut,
-    ClearCache,
 }
 
 /// Start the Telegram background thread and return the command sender and UI receiver.
@@ -112,18 +109,13 @@ async fn run_telegram(
     let mut messages_iter: Option<client::MessageIter> = None;
     let mut selected_chat_id: Option<i64> = None;
 
-    let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("min-mpv")
-        .join("telegram_cache");
-    let cache_manager = Arc::new(tokio::sync::Mutex::new(DocCacheManager::new(cache_dir)));
     let video_registry: Arc<tokio::sync::Mutex<HashMap<i32, client::VideoDownloadInfo>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
-    // Start the combined proxy server (remote URLs + Telegram videos).
+    // Start the combined proxy server (remote URLs + Telegram videos). Telegram videos are
+    // streamed straight from the network by the proxy, with no on-disk cache.
     let proxy_state = ProxyState {
         reqwest_client: reqwest::Client::new(),
-        cache_manager: cache_manager.clone(),
         video_registry: video_registry.clone(),
         telegram_client: Some(client.clone_inner()),
     };
@@ -409,50 +401,8 @@ async fn run_telegram(
                     continue;
                 }
 
-                let cache = {
-                    let mut cm = cache_manager.lock().await;
-                    match cm.get_or_create(video.chat_id, msg_id, size).await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            let _ = ui_tx.send(UiMessage::VideoError(format!(
-                                "Cache error: {e}"
-                            )));
-                            continue;
-                        }
-                    }
-                };
-
-                // Spawn sequential background download to keep the cache ahead of playback.
-                let dl_client = client.clone_inner();
-                let dl_doc = video.document.clone();
-                let dl_cache = cache.clone();
-                let dl_msg_id = msg_id;
-                tokio::spawn(async move {
-                    tracing::info!("bg: starting download for msg_id={}", dl_msg_id);
-                    let mut iter = dl_client.iter_download(&dl_doc);
-                    let mut offset: u64 = 0;
-                    loop {
-                        let chunk = match iter.next().await {
-                            Ok(Some(c)) => c,
-                            Ok(None) => break,
-                            Err(e) => {
-                                tracing::error!("bg: download error msg_id={}: {}", dl_msg_id, e);
-                                break;
-                            }
-                        };
-                        if let Err(e) = dl_cache.write_at(offset, &chunk).await {
-                            tracing::error!("bg: cache write error msg_id={}: {}", dl_msg_id, e);
-                            break;
-                        }
-                        offset += chunk.len() as u64;
-                    }
-                    tracing::info!(
-                        "bg: download complete msg_id={} ({} bytes)",
-                        dl_msg_id,
-                        offset
-                    );
-                });
-
+                // No cache and no background download: the proxy streams the video straight
+                // from Telegram to the player as the player requests bytes.
                 let url = format!("http://127.0.0.1:{}/telegram/{}", proxy_port, msg_id);
                 let _ = ui_tx.send(UiMessage::VideoReady { msg_id, url });
             }
@@ -468,10 +418,6 @@ async fn run_telegram(
                 login_token = None;
                 password_token = None;
                 let _ = ui_tx.send(UiMessage::NeedsAuth);
-            }
-            BgCommand::ClearCache => {
-                tracing::info!("telegram: clearing video cache");
-                cache_manager.lock().await.clear();
             }
         }
     }

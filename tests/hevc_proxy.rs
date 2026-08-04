@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 
-use min_mpv::telegram::cache::DocCacheManager;
 use min_mpv::telegram::client::{find_first_hevc_video, is_hevc_video, TelegramClient};
 use min_mpv::telegram::config::TelegramConfig;
 use min_mpv::telegram::proxy::{start_server, ProxyState};
@@ -74,18 +73,13 @@ async fn find_first_hevc_video_and_test_proxy_range() {
     println!("Found HEVC video: msg_id={} size={} name={}", video.msg_id, video.size, name);
     assert!(is_hevc_video(&video));
 
-    let cache_dir = std::env::temp_dir().join(format!("min-mpv-hevc-test-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&cache_dir);
-    std::fs::create_dir_all(&cache_dir).unwrap();
-
-    let cache_manager = Arc::new(Mutex::new(DocCacheManager::new(cache_dir.clone())));
     let mut registry = HashMap::new();
     registry.insert(video.msg_id, video.clone());
     let video_registry = Arc::new(Mutex::new(registry));
 
+    // Telegram videos are streamed straight from the network; no cache involved.
     let proxy_state = ProxyState {
         reqwest_client: reqwest::Client::new(),
-        cache_manager: cache_manager.clone(),
         video_registry: video_registry.clone(),
         telegram_client: Some(client.clone_inner()),
     };
@@ -146,7 +140,4 @@ async fn find_first_hevc_video_and_test_proxy_range() {
     let body = res.bytes().await.unwrap();
     assert!(!body.is_empty());
     assert_eq!(body.len() as u64, tail_len);
-
-    // Clean up.
-    std::fs::remove_dir_all(&cache_dir).ok();
 }

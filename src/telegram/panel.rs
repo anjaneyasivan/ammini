@@ -1,21 +1,16 @@
-use std::time::{Duration, Instant};
-use tokio::sync::mpsc::UnboundedSender;
 use eframe::egui;
+use tokio::sync::mpsc::UnboundedSender;
 
-use crate::telegram::{BgCommand};
+use crate::telegram::BgCommand;
 use crate::telegram::state_machine::{TelegramData, TelegramEvent, TelegramFsm, TelegramState};
 use statig::blocking::StateMachine;
 
-const TOAST_DURATION: Duration = Duration::from_secs(3);
-
 /// Sidebar widget for the Telegram chat UI.
-pub struct TelegramPanel {
-    toast: Option<(String, Instant)>,
-}
+pub struct TelegramPanel {}
 
 impl TelegramPanel {
     pub fn new() -> Self {
-        Self { toast: None }
+        Self {}
     }
 
     pub fn ui(
@@ -26,7 +21,6 @@ impl TelegramPanel {
     ) {
         ui.heading("Telegram");
         ui.separator();
-        self.render_toast(ui);
 
         let state = fsm.state();
         match state {
@@ -37,26 +31,6 @@ impl TelegramPanel {
             TelegramState::AwaitingPassword {} => self.password_ui(ui, fsm, bg),
             TelegramState::ChatList {} => self.chat_list_ui(ui, fsm, bg),
             TelegramState::MessageList {} => self.message_list_ui(ui, fsm, bg),
-        }
-
-        self.render_toast(ui);
-    }
-
-    fn show_toast(&mut self, msg: impl Into<String>) {
-        self.toast = Some((msg.into(), Instant::now()));
-    }
-
-    fn render_toast(&mut self, ui: &mut egui::Ui) {
-        if let Some((msg, when)) = &self.toast {
-            if Instant::now().duration_since(*when) > TOAST_DURATION {
-                self.toast = None;
-                return;
-            }
-            ui.horizontal(|ui| {
-                ui.colored_label(egui::Color32::YELLOW, "⚠");
-                ui.label(msg);
-            });
-            ui.separator();
         }
     }
 
@@ -227,10 +201,6 @@ impl TelegramPanel {
         ui.separator();
         if ui.button("Sign out").clicked() {
             Self::send(bg, BgCommand::SignOut);
-        }
-        if ui.button("Clear video cache").clicked() {
-            Self::send(bg, BgCommand::ClearCache);
-            self.show_toast("Telegram video cache cleared");
         }
     }
 

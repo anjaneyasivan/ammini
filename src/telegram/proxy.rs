@@ -17,10 +17,11 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::telegram::cache::{DocCache, DocCacheManager};
 use crate::telegram::client::{Document, VideoDownloadInfo};
 
-const RANGE_DOWNLOAD_CHUNK_SIZE: i32 = 512 * 1024;
+/// Chunk size used when downloading a Telegram document. A requested range may start and
+/// end mid-chunk; `RangeWindow` trims the excess bytes.
+const DOWNLOAD_CHUNK_SIZE: i32 = 512 * 1024;
 
 const URL_REQ_WHITELIST: &[&str] = &[
     "range",
@@ -45,9 +46,9 @@ const URL_RESP_WHITELIST: &[&str] = &[
 /// Shared state for the combined proxy server.
 pub struct ProxyState {
     pub reqwest_client: ReqwestClient,
-    pub cache_manager: Arc<Mutex<DocCacheManager>>,
     pub video_registry: Arc<Mutex<HashMap<i32, VideoDownloadInfo>>>,
-    /// Optional Telegram client used to fetch ranges on demand when the cache doesn't have them.
+    /// Telegram client used to stream video bytes straight from the network to the player,
+    /// with no on-disk cache in between.
     pub telegram_client: Option<Client>,
 }
 
@@ -62,7 +63,10 @@ pub async fn start_server(state: ProxyState) -> anyhow::Result<u16> {
     let addr = listener.local_addr()?;
     let port = addr.port();
 
-    tracing::info!("proxy: listening on http://127.0.0.1:{}/{{url,telegram}}", port);
+    tracing::info!(
+        "proxy: listening on http://127.0.0.1:{}/{{url,telegram}}",
+        port
+    );
 
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -168,7 +172,7 @@ async fn handle_telegram(
     headers: HeaderMap,
     State(state): State<Arc<ProxyState>>,
 ) -> AxumResponse {
-    tracing::debug!("proxy: telegram request for msg_id={msg_id}");
+    tracing::debug!("proxy: telegram request for msg_id={msg_id} method={method}");
 
     let video = {
         let registry = state.video_registry.lock().await;
@@ -188,6 +192,7 @@ async fn handle_telegram(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Unknown file size");
     }
 
+    let has_range = headers.contains_key(header::RANGE);
     let (start, end, status, content_range) = match parse_range(&headers, total_size) {
         Some((s, e)) => (
             s,
@@ -199,35 +204,22 @@ async fn handle_telegram(
     };
 
     let content_length = end - start + 1;
+    tracing::debug!(
+        "proxy: msg_id={msg_id} has_range={has_range} start={start} end={end} len={content_length}"
+    );
 
     if method == Method::HEAD {
         return build_telegram_response(status, content_range, content_length, Body::empty());
     }
 
-    let cache = {
-        let mut cm = state.cache_manager.lock().await;
-        match cm.get_or_create(video.chat_id, msg_id, total_size).await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("proxy: failed to create cache: {e}");
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Cache error");
-            }
-        }
+    // Stream the requested range straight from Telegram, no disk involved. Every HTTP
+    // request spawns its own download starting at the chunk containing `start`; it stops
+    // once `end` has been delivered (or the player disconnects).
+    let Some(client) = state.telegram_client.clone() else {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Telegram client unavailable");
     };
 
-    // If the requested range isn't in the cache yet, kick off an on-demand download so the
-    // stream doesn't block forever waiting for the sequential background download to reach it.
-    if !cache.is_range_downloaded(start, end).await {
-        if let Some(client) = state.telegram_client.clone() {
-            let document = video.document.clone();
-            let dl_cache = cache.clone();
-            tokio::spawn(async move {
-                download_range(client, document, dl_cache, start).await;
-            });
-        }
-    }
-
-    let stream = cache_stream(cache, start, end);
+    let stream = telegram_range_stream(client, video.document.clone(), start, end);
     build_telegram_response(status, content_range, content_length, Body::from_stream(stream))
 }
 
@@ -287,41 +279,40 @@ fn parse_range(headers: &HeaderMap, total_size: u64) -> Option<(u64, u64)> {
     Some((start, end))
 }
 
-/// Stream a byte range from the cache as it becomes available.
-fn cache_stream(
-    cache: Arc<DocCache>,
+/// Stream the byte window `[start, end]` of a Telegram document directly from the
+/// network to the caller. The download begins at the `DOWNLOAD_CHUNK_SIZE`-aligned chunk
+/// containing `start` and stops as soon as `end` has been delivered; dropping the
+/// receiver cancels the download.
+fn telegram_range_stream(
+    client: Client,
+    document: Document,
     start: u64,
     end: u64,
 ) -> ReceiverStream<Result<Bytes, anyhow::Error>> {
-    const CHUNK_LIMIT: u64 = 64 * 1024;
+    let skip = (start / DOWNLOAD_CHUNK_SIZE as u64) as i32;
+    let mut window = RangeWindow::new(start, end, DOWNLOAD_CHUNK_SIZE as u64);
+    let mut iter = client
+        .iter_download(&document)
+        .chunk_size(DOWNLOAD_CHUNK_SIZE)
+        .skip_chunks(skip);
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, anyhow::Error>>(8);
     tokio::spawn(async move {
-        let mut offset = start;
-        while offset <= end {
-            let target_end = (offset + CHUNK_LIMIT).min(end + 1);
-            if let Err(e) = cache.wait_for_range(offset, target_end).await {
-                let _ = tx.send(Err(e)).await;
-                return;
-            }
-            let available = cache
-                .contiguous_available_from(offset, end)
-                .await
-                .min(CHUNK_LIMIT)
-                .min(end - offset + 1);
-            if available == 0 {
-                return;
-            }
-            match cache.read_at(offset, available).await {
-                Ok(data) => {
-                    let len = data.len() as u64;
-                    if tx.send(Ok(Bytes::from(data))).await.is_err() {
-                        return;
-                    }
-                    offset += len;
-                }
+        while !window.done() {
+            let chunk = match iter.next().await {
+                Ok(Some(c)) => c,
+                Ok(None) => break,
                 Err(e) => {
-                    let _ = tx.send(Err(e)).await;
+                    tracing::error!("proxy: telegram download error: {e}");
+                    let _ = tx
+                        .send(Err(anyhow::anyhow!("telegram download failed: {e}")))
+                        .await;
+                    return;
+                }
+            };
+            if let Some(slice) = window.push(chunk) {
+                if tx.send(Ok(slice)).await.is_err() {
+                    // The player went away; dropping `iter` cancels the Telegram download.
                     return;
                 }
             }
@@ -330,32 +321,50 @@ fn cache_stream(
     ReceiverStream::new(rx)
 }
 
-/// Download a specific byte range from Telegram and write it into the cache.
-/// The iterator is positioned at the chunk containing `start`; downloaded bytes before `start`
-/// are still written to the cache because Telegram returns fixed chunk boundaries.
-async fn download_range(client: Client, document: Document, cache: Arc<DocCache>, start: u64) {
-    let chunk_size = RANGE_DOWNLOAD_CHUNK_SIZE;
-    let skip = (start / chunk_size as u64) as i32;
-    let mut iter = client
-        .iter_download(&document)
-        .chunk_size(chunk_size)
-        .skip_chunks(skip);
+/// Tracks how much of a Telegram download belongs to the requested byte window so the
+/// stream can drop bytes before `start` and stop after `end`.
+struct RangeWindow {
+    /// Bytes to drop from the first chunk returned by the download iterator.
+    skip_prefix: usize,
+    /// Bytes already emitted.
+    sent: u64,
+    /// Total bytes to emit.
+    total: u64,
+    /// Whether we are still waiting for the first chunk that lies inside the window.
+    first: bool,
+}
 
-    let mut offset = skip as u64 * chunk_size as u64;
-    loop {
-        let chunk = match iter.next().await {
-            Ok(Some(c)) => c,
-            Ok(None) => break,
-            Err(e) => {
-                tracing::error!("proxy: range download error at offset {}: {}", offset, e);
-                break;
-            }
-        };
-        if let Err(e) = cache.write_at(offset, &chunk).await {
-            tracing::error!("proxy: cache write error at offset {}: {}", offset, e);
-            break;
+impl RangeWindow {
+    fn new(start: u64, end: u64, chunk_size: u64) -> Self {
+        let chunk_start = (start / chunk_size) * chunk_size;
+        Self {
+            skip_prefix: (start - chunk_start) as usize,
+            sent: 0,
+            total: end - start + 1,
+            first: true,
         }
-        offset += chunk.len() as u64;
+    }
+
+    /// Feed the next chunk from the download iterator and return the slice of it that
+    /// belongs to the window (`None` if the chunk lies entirely before `start`).
+    fn push(&mut self, chunk: Vec<u8>) -> Option<Bytes> {
+        let mut data = Bytes::from(chunk);
+        if self.first {
+            if self.skip_prefix >= data.len() {
+                // Defensive: whole chunk is before the requested window, keep waiting.
+                return None;
+            }
+            self.first = false;
+            data = data.slice(self.skip_prefix..);
+        }
+        let remaining = self.total - self.sent;
+        let take = (data.len() as u64).min(remaining) as usize;
+        self.sent += take as u64;
+        Some(data.slice(..take))
+    }
+
+    fn done(&self) -> bool {
+        self.sent >= self.total
     }
 }
 
@@ -369,65 +378,6 @@ fn error_response(status: StatusCode, msg: &str) -> AxumResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
-    use tokio_stream::StreamExt;
-
-    #[tokio::test]
-    async fn cache_stream_yields_while_downloading() {
-        let dir = std::env::temp_dir().join(format!("min-mpv-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let cache = DocCache::create(&dir, 1, 100, 1024).await.unwrap();
-
-        let stream = cache_stream(cache.clone(), 0, 9);
-        let collector = tokio::spawn(async move {
-            let mut bytes = Vec::new();
-            let mut stream = stream;
-            while let Some(chunk) = stream.next().await {
-                bytes.extend_from_slice(&chunk.unwrap());
-            }
-            bytes
-        });
-
-        // Simulate sequential download: first half, then the rest.
-        cache.write_at(0, &[0, 1, 2, 3, 4]).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        cache.write_at(5, &[5, 6, 7, 8, 9]).await.unwrap();
-
-        let result = tokio::time::timeout(Duration::from_secs(5), collector)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(result, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[tokio::test]
-    async fn cache_stream_reads_non_sequential_range() {
-        let dir = std::env::temp_dir().join(format!("min-mpv-test-ns-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let cache = DocCache::create(&dir, 1, 200, 1024).await.unwrap();
-
-        // Write the tail of the file first, as an on-demand range download would.
-        cache.write_at(100, &[10, 11, 12, 13, 14]).await.unwrap();
-
-        let stream = cache_stream(cache.clone(), 100, 104);
-        let result = tokio::time::timeout(Duration::from_secs(5), async move {
-            let mut bytes = Vec::new();
-            let mut stream = stream;
-            while let Some(chunk) = stream.next().await {
-                bytes.extend_from_slice(&chunk.unwrap());
-            }
-            bytes
-        })
-        .await
-        .unwrap();
-
-        assert_eq!(result, vec![10, 11, 12, 13, 14]);
-        std::fs::remove_dir_all(&dir).ok();
-    }
 
     #[test]
     fn parse_range_handles_common_formats() {
@@ -449,5 +399,49 @@ mod tests {
 
         headers.insert(header::RANGE, "bytes=0-0".parse().unwrap());
         assert_eq!(parse_range(&headers, 1000), Some((0, 0)));
+    }
+
+    #[test]
+    fn range_window_slices_within_first_chunk() {
+        // start=1000, end=1999 both lie inside the first 512 KiB chunk.
+        let mut w = RangeWindow::new(1000, 1999, 512 * 1024);
+        assert!(!w.done());
+        let out = w.push(vec![7u8; 512 * 1024]).unwrap();
+        assert_eq!(out.len(), 1000);
+        assert!(out.iter().all(|b| *b == 7));
+        assert!(w.done());
+    }
+
+    #[test]
+    fn range_window_consumes_multiple_chunks() {
+        // start is 10 bytes before the second chunk boundary; end lands mid-chunk 2.
+        let start = 512 * 1024 - 10;
+        let end = 1_200_000;
+        let mut w = RangeWindow::new(start, end, 512 * 1024);
+
+        // Chunk 0 (bytes 0..512 KiB): only its last 10 bytes belong to the window.
+        let out0 = w.push(vec![1u8; 512 * 1024]).unwrap();
+        assert_eq!(out0.len(), 10);
+
+        // Chunk 1 is fully inside the window.
+        let out1 = w.push(vec![2u8; 512 * 1024]).unwrap();
+        assert_eq!(out1.len(), 512 * 1024);
+
+        // Chunk 2 covers the tail of the window.
+        let out2 = w.push(vec![3u8; 512 * 1024]).unwrap();
+        let expected = end - start + 1 - out0.len() as u64 - out1.len() as u64;
+        assert_eq!(out2.len(), expected as usize);
+        assert!(w.done());
+    }
+
+    #[test]
+    fn range_window_chunk_aligned_start() {
+        // start exactly on a chunk boundary: the download begins at that chunk.
+        let mut w = RangeWindow::new(512 * 1024, 1024 * 1024 + 5, 512 * 1024);
+        let out = w.push(vec![2u8; 512 * 1024]).unwrap();
+        assert_eq!(out.len(), 512 * 1024);
+        let out = w.push(vec![3u8; 512 * 1024]).unwrap();
+        assert_eq!(out.len(), 6);
+        assert!(w.done());
     }
 }

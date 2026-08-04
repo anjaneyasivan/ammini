@@ -19,6 +19,10 @@ pub const DIALOG_PAGE_SIZE: usize = 20;
 /// How many messages to fetch per page.
 pub const MESSAGE_PAGE_SIZE: usize = 50;
 
+/// File extensions treated as playable video. Some files (e.g. `.mkv` sent as a plain
+/// attachment) carry no Telegram video attributes, so we fall back on the file name.
+const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
+
 /// Wrapper around the grammers Client providing high-level async operations.
 pub struct TelegramClient {
     client: Client,
@@ -229,8 +233,18 @@ fn extract_video(
         _ => return (false, None),
     };
 
-    // Video documents have a duration or resolution attribute.
-    let is_video = doc.duration().is_some() || doc.resolution().is_some();
+    // Video documents usually carry a duration or resolution attribute, but files sent as
+    // plain attachments (e.g. `.mkv`) may not, so also accept video file names / MIME types.
+    let is_video = doc.duration().is_some()
+        || doc.resolution().is_some()
+        || doc
+            .name()
+            .map(|n| is_video_filename(n))
+            .unwrap_or(false)
+        || doc
+            .mime_type()
+            .map(|m| m.to_lowercase().starts_with("video/"))
+            .unwrap_or(false);
     if !is_video {
         return (false, None);
     }
@@ -247,6 +261,14 @@ fn extract_video(
             size,
         }),
     )
+}
+
+/// Returns true if the filename ends with a known video extension (case-insensitive).
+fn is_video_filename(name: &str) -> bool {
+    name.rsplit('.')
+        .next()
+        .map(|ext| VIDEO_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+        .unwrap_or(false)
 }
 
 /// Returns true if the filename or MIME type suggests HEVC/H.265 content.
@@ -319,11 +341,38 @@ pub struct MessageInfo {
     pub has_video: bool,
 }
 
-/// Everything needed to download and cache a video from a Telegram message.
+/// Everything needed to download a video from a Telegram message.
 #[derive(Debug, Clone)]
 pub struct VideoDownloadInfo {
     pub msg_id: i32,
     pub chat_id: i64,
     pub document: Document,
     pub size: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_video_filename;
+
+    #[test]
+    fn recognizes_common_video_extensions() {
+        for name in [
+            "movie.mkv",
+            "clip.MP4",
+            "file.avi",
+            "video.mov",
+            "webm.webm",
+            "thing.ogv",
+            "x.flv",
+        ] {
+            assert!(is_video_filename(name), "expected {name} to be a video");
+        }
+    }
+
+    #[test]
+    fn rejects_non_video_filenames() {
+        for name in ["doc.pdf", "archive.zip", "song.mp3", "no_extension", "video.mkv.bak"] {
+            assert!(!is_video_filename(name), "expected {name} not to be a video");
+        }
+    }
 }

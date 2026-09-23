@@ -32,6 +32,16 @@ egui_material_icons = "0.7"
 # Same version egui-sharkplayer uses; unifies to the same libmpv instance so the
 # vendored `PlayerState::mpv()` accessor can read/set arbitrary mpv properties.
 libmpv2 = "6"
+opentelemetry = { version = "0.33", default-features = false, features = ["logs"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["logs"] }
+# reqwest-client (not hyper-client): opentelemetry-http's hyper client has no TLS
+# backend, and the OTLP endpoint is https. Reuses the app's reqwest 0.13.
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["logs", "http-proto", "reqwest-client"] }
+# Metrics only: events/logs go to Sentry over OTLP, but Sentry does not ingest OTLP
+# metrics, so the sentry crate (native counter/gauge/distribution) is the metrics
+# transport. Default integrations (panic hook, log capture) stay disabled so nothing
+# is double-captured by the OTLP pipeline.
+sentry = { version = "0.49", default-features = false, features = ["metrics", "transport", "reqwest", "backtrace", "contexts"] }
 
 # Vendored with a tiny patch (PlayerState::mpv accessor) so the app can switch audio
 # tracks — see vendor/egui-sharkplayer. Keep the patch minimal.

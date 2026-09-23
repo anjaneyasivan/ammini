@@ -6,6 +6,7 @@ use ammini::telegram::config::TelegramConfig;
 use ammini::telegram::panel::TelegramPanel;
 use ammini::telegram::state_machine::{TelegramEvent, TelegramFsm};
 use ammini::telegram::{BgCommand, UiMessage, start};
+use ammini::telemetry::TelemetryEvent;
 use eframe::{App, Frame, NativeOptions, egui};
 use egui_material_icons::{MaterialIcon, icons::*};
 use egui_sharkplayer::{PlayerState, SharkPlayer};
@@ -623,9 +624,27 @@ impl App for AmminiApp {
                     }
                 }
                 UiMessage::VideoError(e) => {
+                    ammini::telemetry::emit(TelemetryEvent::Error {
+                        component: "telegram.video",
+                        message: e.clone(),
+                    });
                     self.telegram_fsm.handle(&TelegramEvent::VideoError(e));
                 }
                 other => {
+                    // Central error/telegram-auth reporting: every background error
+                    // funnels through these three messages, so the emit sites stay
+                    // in one place instead of scattered through the bg loop.
+                    if let UiMessage::AuthError(reason) = &other {
+                        ammini::telemetry::emit(TelemetryEvent::TelegramLoginFailed {
+                            reason: reason.clone(),
+                        });
+                    }
+                    if let UiMessage::Error(message) = &other {
+                        ammini::telemetry::emit(TelemetryEvent::Error {
+                            component: "telegram",
+                            message: message.clone(),
+                        });
+                    }
                     if let Some(event) =
                         ammini::telegram::state_machine::ui_message_to_event(&other)
                     {
@@ -734,6 +753,16 @@ fn main() {
     };
 
     let (bg_tx, ui_rx) = start(telegram_config);
+
+    // Telemetry — Sentry via the OTLP endpoint (logs/events) plus native metrics
+    // through the sentry SDK. Credentials come from `.env` (SENTRY_DSN /
+    // SENTRY_OTLP_URL); without them telemetry stays disabled. The guard flushes
+    // pending events on exit, after eframe has torn the window down.
+    ammini::telemetry::install_panic_hook();
+    let _telemetry = ammini::telemetry::start();
+    ammini::telemetry::emit(TelemetryEvent::AppStarted {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    });
 
     // Bundled app icon: the blue play squircle, cropped to its edge and resized.
     let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/ammini-icon.png"))

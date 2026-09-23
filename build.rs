@@ -32,7 +32,12 @@ fn bake_dotenv() {
 
     let dotenv = parse_env_file(&dotenv_path);
 
-    for key in ["TELEGRAM_API_ID", "TELEGRAM_API_HASH"] {
+    for key in [
+        "TELEGRAM_API_ID",
+        "TELEGRAM_API_HASH",
+        "SENTRY_DSN",
+        "SENTRY_OTLP_URL",
+    ] {
         println!("cargo:rerun-if-env-changed={key}");
         if let Some(value) = std::env::var(key).ok().or_else(|| dotenv.get(key).cloned()) {
             println!("cargo:rustc-env={key}={value}");

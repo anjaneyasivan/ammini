@@ -169,6 +169,7 @@ async fn run_telegram(
         Ok(true) => {
             tracing::info!("telegram: already authorized");
             self_user_id = client::self_user_id(&client).await;
+            crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramSignedIn);
             let _ = ui_tx.send(UiMessage::AuthSuccess);
             let mut iter = client.iter_dialogs();
             match client::next_dialogs_page(&mut iter, client::DIALOG_PAGE_SIZE).await {
@@ -223,6 +224,7 @@ async fn run_telegram(
                             user.id().bare_id_unchecked()
                         );
                         self_user_id = Some(user.id().bare_id_unchecked());
+                        crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramSignedIn);
                         let _ = ui_tx.send(UiMessage::AuthSuccess);
                         let mut iter = client.iter_dialogs();
                         match client::next_dialogs_page(&mut iter, client::DIALOG_PAGE_SIZE).await {
@@ -275,6 +277,7 @@ async fn run_telegram(
                     Ok(user) => {
                         tracing::info!("telegram: 2FA ok (user {})", user.id().bare_id_unchecked());
                         self_user_id = Some(user.id().bare_id_unchecked());
+                        crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramSignedIn);
                         let _ = ui_tx.send(UiMessage::AuthSuccess);
                         let mut iter = client.iter_dialogs();
                         match client::next_dialogs_page(&mut iter, client::DIALOG_PAGE_SIZE).await {
@@ -435,6 +438,10 @@ async fn run_telegram(
                 // the player requests bytes.
                 let url = format!("http://127.0.0.1:{}/telegram/{}", proxy_port, msg_id);
                 let name = video_display_name(&video.document);
+                crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramVideoPlayed {
+                    file_name: name.clone(),
+                    size_bytes: Some(video.size as u64),
+                });
                 let _ = ui_tx.send(UiMessage::VideoReady { msg_id, url, name });
             }
             BgCommand::PlayTelegramVideo { peer, msg_id } => {
@@ -445,6 +452,12 @@ async fn run_telegram(
                         video_registry.lock().await.insert(msg_id, video.clone());
                         let url = format!("http://127.0.0.1:{}/telegram/{}", proxy_port, msg_id);
                         let name = video_display_name(&video.document);
+                        crate::telemetry::emit(
+                            crate::telemetry::TelemetryEvent::TelegramVideoPlayed {
+                                file_name: name.clone(),
+                                size_bytes: Some(video.size as u64),
+                            },
+                        );
                         let _ = ui_tx.send(UiMessage::VideoReady { msg_id, url, name });
                     }
                     Err(e) => {
@@ -477,6 +490,9 @@ async fn run_telegram(
                 if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
                     tracing::warn!("failed to wipe cache dir {}: {e}", cache_dir.display());
                 }
+                crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramSignedOut {
+                    reason: crate::telemetry::SignOutReason::Manual,
+                });
                 let _ = ui_tx.send(UiMessage::NeedsAuth);
             }
         }

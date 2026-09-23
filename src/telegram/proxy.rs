@@ -28,6 +28,12 @@ const DOWNLOAD_CHUNK_SIZE: u64 = cache::BLOCK_SIZE;
 /// Telegram round-trip per block.
 const PREFETCH_BLOCKS: u64 = 4;
 
+/// How often per-stream telemetry (download speed, bytes, hit/miss deltas) is
+/// flushed. Blocks stream at up to ~2k/s at local speeds, so per-block emission
+/// would flood the telemetry channel — aggregate windows keep it to a few
+/// events per second.
+const METRIC_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+
 const URL_REQ_WHITELIST: &[&str] = &[
     "range",
     "accept",
@@ -334,6 +340,12 @@ fn telegram_cache_stream(
         // Blocks whose downloads were already kicked off ahead of the current one.
         let mut prefetched_up_to = first_block;
 
+        // Stream window counters for telemetry (see `METRIC_WINDOW`).
+        let mut window_start = std::time::Instant::now();
+        let mut window_bytes: u64 = 0;
+        let mut window_hits: u64 = 0;
+        let mut window_misses: u64 = 0;
+
         for block in first_block..=last_block {
             // Prefetch the next few blocks while this one streams. `ensure` deduplicates
             // (the first task downloads, the rest wait), so redundant spawns are cheap;
@@ -350,10 +362,15 @@ fn telegram_cache_stream(
                 });
             }
 
+            // `on_disk` stays true only if the first read hit the cache; blocks that
+            // needed a download (or waited for a prefetch to finish) count as misses.
+            let mut on_disk = true;
             let result = loop {
                 match cache.read_block(block).await {
                     Ok(Some(bytes)) => break Ok(bytes),
-                    Ok(None) => {}
+                    Ok(None) => {
+                        on_disk = false;
+                    }
                     Err(e) => break Err(anyhow::anyhow!("cache read error: {e}")),
                 }
                 // Block is not on disk yet. Ensure it is downloaded (or wait for the
@@ -374,6 +391,12 @@ fn telegram_cache_stream(
             let bytes = match result {
                 Ok(b) => b,
                 Err(e) => {
+                    flush_stream_metrics(
+                        &mut window_start,
+                        &mut window_bytes,
+                        &mut window_hits,
+                        &mut window_misses,
+                    );
                     let _ = tx.send(Err(e)).await;
                     return;
                 }
@@ -387,11 +410,66 @@ fn telegram_cache_stream(
                     .len()
                     .saturating_sub(if block == last_block { trim_suffix } else { 0 });
             if start_idx < end_idx && tx.send(Ok(bytes.slice(start_idx..end_idx))).await.is_err() {
-                return; // player went away
+                // Player went away — report the window collected so far.
+                flush_stream_metrics(
+                    &mut window_start,
+                    &mut window_bytes,
+                    &mut window_hits,
+                    &mut window_misses,
+                );
+                return;
+            }
+            window_bytes += (end_idx - start_idx) as u64;
+            if on_disk {
+                window_hits += 1;
+            } else {
+                window_misses += 1;
+            }
+            if window_start.elapsed() >= METRIC_WINDOW {
+                flush_stream_metrics(
+                    &mut window_start,
+                    &mut window_bytes,
+                    &mut window_hits,
+                    &mut window_misses,
+                );
             }
         }
+
+        // Stream finished (or the player stopped pulling): report the tail window.
+        flush_stream_metrics(
+            &mut window_start,
+            &mut window_bytes,
+            &mut window_hits,
+            &mut window_misses,
+        );
     });
     ReceiverStream::new(rx)
+}
+
+/// Flush the accumulated stream window to telemetry: one speed sample plus the
+/// byte/hit/miss deltas since the previous flush.
+fn flush_stream_metrics(
+    window_start: &mut std::time::Instant,
+    window_bytes: &mut u64,
+    window_hits: &mut u64,
+    window_misses: &mut u64,
+) {
+    use crate::telemetry::{Metric, TelemetryEvent};
+    let elapsed = window_start.elapsed().as_secs_f64().max(0.001);
+    let bytes = std::mem::take(window_bytes);
+    let hits = std::mem::take(window_hits);
+    let misses = std::mem::take(window_misses);
+    if bytes > 0 || hits > 0 || misses > 0 {
+        crate::telemetry::emit(TelemetryEvent::Metric(Metric::DownloadSpeed {
+            bytes_per_sec: bytes as f64 / elapsed,
+        }));
+        crate::telemetry::emit(TelemetryEvent::Metric(Metric::BytesDownloaded { bytes }));
+        crate::telemetry::emit(TelemetryEvent::Metric(Metric::CacheHits { count: hits }));
+        crate::telemetry::emit(TelemetryEvent::Metric(Metric::CacheMisses {
+            count: misses,
+        }));
+    }
+    *window_start = std::time::Instant::now();
 }
 
 fn error_response(status: StatusCode, msg: &str) -> AxumResponse {

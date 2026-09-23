@@ -257,15 +257,43 @@ fn load_media(fsm: &mut PlayerFsm, path: String) -> Outcome<FsmState> {
     match fsm.player.load_file(&path) {
         Ok(()) => {
             info!("loading media: {path}");
+            crate::telemetry::emit(crate::telemetry::TelemetryEvent::PlaybackStarted {
+                source: playback_source(&path),
+                file_name: file_name_of(&path),
+            });
             fsm.status = format!("Loading: {path}");
             Transition(FsmState::loading())
         }
         Err(e) => {
             error!("failed to load {path}: {e}");
+            crate::telemetry::emit(crate::telemetry::TelemetryEvent::PlaybackFailed {
+                source: playback_source(&path),
+                file_name: Some(file_name_of(&path)),
+                error: e.to_string(),
+            });
             fsm.status = format!("Error loading {path}: {e}");
             Transition(FsmState::error())
         }
     }
+}
+
+/// Attribute a media path to the source it came from. Playlist replays re-enter
+/// through `SelectTrack`/`Next`/`Previous`, so this is derived from the path shape
+/// rather than the triggering event: proxy URLs carry the route they were built from.
+fn playback_source(path: &str) -> crate::telemetry::PlaybackSource {
+    if path.starts_with("http") && path.contains("/telegram/") {
+        crate::telemetry::PlaybackSource::Telegram
+    } else if path.starts_with("http") {
+        crate::telemetry::PlaybackSource::Url
+    } else {
+        crate::telemetry::PlaybackSource::LocalFile
+    }
+}
+
+/// Base name of a media path — file names only, never full paths (no PII from
+/// directory structure).
+fn file_name_of(path: &str) -> String {
+    path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned()
 }
 
 /// Keep `persistent.playlist`/`current_index` in step with the live playlist so the

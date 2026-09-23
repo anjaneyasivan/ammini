@@ -1,10 +1,11 @@
 use eframe::egui;
-use egui_material_icons::icons::*;
+use egui_material_icons::{MaterialIcon, icons::*};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::fonts::icon_label;
-use crate::telegram::BgCommand;
+use crate::style;
 use crate::telegram::state_machine::{TelegramData, TelegramEvent, TelegramFsm, TelegramState};
+use crate::telegram::{BgCommand, DialogInfo};
 use statig::blocking::StateMachine;
 
 /// Sidebar widget for the Telegram chat UI.
@@ -48,6 +49,72 @@ impl TelegramPanel {
         unsafe { &mut fsm.inner_mut().data }
     }
 
+    /// Filled accent button (white text) for the primary action of a screen.
+    fn primary_button(ui: &mut egui::Ui, icon: MaterialIcon, label: &str) -> egui::Response {
+        ui.add(
+            egui::Button::new(
+                egui::RichText::new(icon_label(icon, label)).color(egui::Color32::WHITE),
+            )
+            .fill(style::ACCENT),
+        )
+    }
+
+    /// A 60px chat card: avatar circle with initials, name and a preview line, with
+    /// accent-tinted hover/selection fills (macOS Messages style).
+    fn chat_row(ui: &mut egui::Ui, dialog: &DialogInfo, selected: bool) -> egui::Response {
+        let desired = egui::vec2(ui.available_width(), 60.0);
+        let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click());
+        if ui.is_rect_visible(rect) {
+            let dark = style::is_dark(ui.ctx());
+            let bg = if selected {
+                style::selected_fill()
+            } else if response.hovered() {
+                style::hover_fill()
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            ui.painter()
+                .rect_filled(rect, egui::CornerRadius::same(style::CONTAINER_RADIUS), bg);
+
+            let avatar_center = rect.left_center() + egui::vec2(28.0, 0.0);
+            ui.painter()
+                .circle_filled(avatar_center, 20.0, style::avatar_fill(&dialog.name));
+            let initial = dialog
+                .name
+                .chars()
+                .next()
+                .unwrap_or('?')
+                .to_uppercase()
+                .to_string();
+            ui.painter().text(
+                avatar_center,
+                egui::Align2::CENTER_CENTER,
+                initial,
+                egui::FontId::proportional(15.0),
+                egui::Color32::WHITE,
+            );
+
+            let text_x = rect.left() + 56.0;
+            ui.painter().text(
+                egui::pos2(text_x, rect.top() + 12.0),
+                egui::Align2::LEFT_TOP,
+                &dialog.name,
+                egui::FontId::proportional(15.0),
+                style::text_primary(dark),
+            );
+            if let Some(preview) = &dialog.last_message {
+                ui.painter().text(
+                    egui::pos2(text_x, rect.top() + 34.0),
+                    egui::Align2::LEFT_TOP,
+                    truncate_preview(preview),
+                    egui::FontId::proportional(12.5),
+                    style::text_secondary(dark),
+                );
+            }
+        }
+        response
+    }
+
     fn connecting_ui(&self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.spinner();
@@ -86,7 +153,7 @@ impl TelegramPanel {
             });
             data.phone.trim().to_string()
         };
-        if ui.button(icon_label(ICON_SEND, "Send Code")).clicked() && !phone.is_empty() {
+        if Self::primary_button(ui, ICON_SEND, "Send Code").clicked() && !phone.is_empty() {
             fsm.handle(&TelegramEvent::PhoneSubmitted(phone.clone()));
             Self::send(bg, BgCommand::SubmitPhone(phone));
         }
@@ -112,7 +179,7 @@ impl TelegramPanel {
             });
             data.code.trim().to_string()
         };
-        if ui.button(icon_label(ICON_CHECK, "Verify")).clicked() && !code.is_empty() {
+        if Self::primary_button(ui, ICON_CHECK, "Verify").clicked() && !code.is_empty() {
             fsm.handle(&TelegramEvent::CodeSubmitted(code.clone()));
             Self::send(bg, BgCommand::SubmitCode(code));
         }
@@ -152,7 +219,7 @@ impl TelegramPanel {
             let display = data.password.clone();
             (pw, display)
         };
-        if ui.button(icon_label(ICON_LOGIN, "Sign In")).clicked() && !password.is_empty() {
+        if Self::primary_button(ui, ICON_LOGIN, "Sign In").clicked() && !password.is_empty() {
             fsm.handle(&TelegramEvent::PasswordSubmitted(display_pw));
             Self::send(bg, BgCommand::SubmitPassword(password));
         }
@@ -180,16 +247,10 @@ impl TelegramPanel {
             let mut has_more_clicked = false;
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for dialog in &data.dialogs {
-                    ui.horizontal(|ui| {
-                        let response = ui.selectable_label(false, &dialog.name);
-                        if response.clicked() {
-                            clicked = Some(dialog.peer_ref);
-                        }
-                    });
-                    if let Some(preview) = &dialog.last_message {
-                        ui.label(egui::RichText::new(preview).weak().small());
+                    let selected = data.selected_chat == Some(dialog.peer_ref);
+                    if Self::chat_row(ui, dialog, selected).clicked() {
+                        clicked = Some(dialog.peer_ref);
                     }
-                    ui.separator();
                 }
                 if data.has_more_dialogs
                     && ui
@@ -211,7 +272,11 @@ impl TelegramPanel {
         }
 
         ui.separator();
-        if ui.button(icon_label(ICON_LOGOUT, "Sign out")).clicked() {
+        if ui
+            .add(egui::Button::new(ICON_LOGOUT).frame(false))
+            .on_hover_text("Sign out")
+            .clicked()
+        {
             Self::send(bg, BgCommand::SignOut);
         }
     }
@@ -223,7 +288,11 @@ impl TelegramPanel {
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
         ui.horizontal(|ui| {
-            if ui.button(icon_label(ICON_ARROW_BACK, "Back")).clicked() {
+            if ui
+                .add(egui::Button::new(ICON_ARROW_BACK).frame(false))
+                .on_hover_text("Back")
+                .clicked()
+            {
                 fsm.handle(&TelegramEvent::BackToChatList);
                 Self::send(bg, BgCommand::BackToChatList);
             }
@@ -296,5 +365,16 @@ impl TelegramPanel {
 impl Default for TelegramPanel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Painter text doesn't wrap; cut long previews at 43 chars with an ellipsis.
+fn truncate_preview(text: &str) -> String {
+    let mut chars: Vec<char> = text.chars().collect();
+    if chars.len() > 46 {
+        chars.truncate(43);
+        format!("{}…", chars.into_iter().collect::<String>())
+    } else {
+        text.to_string()
     }
 }

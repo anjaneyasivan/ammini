@@ -463,6 +463,7 @@ async fn run_telegram(
                 crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramVideoPlayed {
                     file_name: name.clone(),
                     size_bytes: Some(video.size as u64),
+                    meta: video_meta(&video.document),
                 });
                 let _ = ui_tx.send(UiMessage::VideoReady { msg_id, url, name });
             }
@@ -478,6 +479,7 @@ async fn run_telegram(
                             crate::telemetry::TelemetryEvent::TelegramVideoPlayed {
                                 file_name: name.clone(),
                                 size_bytes: Some(video.size as u64),
+                                meta: video_meta(&video.document),
                             },
                         );
                         let _ = ui_tx.send(UiMessage::VideoReady { msg_id, url, name });
@@ -527,4 +529,18 @@ fn video_display_name(document: &client::Document) -> String {
         .name()
         .map(str::to_owned)
         .unwrap_or_else(|| "video".to_string())
+}
+
+/// Media metadata for a Telegram document, for the `TelegramVideoPlayed` event.
+/// Each field stays `None` when the document doesn't carry it.
+fn video_meta(document: &client::Document) -> crate::telemetry::VideoMeta {
+    let (width, height) = document
+        .resolution()
+        .map_or((None, None), |(w, h)| (Some(w), Some(h)));
+    crate::telemetry::VideoMeta {
+        duration_seconds: document.duration(),
+        width,
+        height,
+        mime: document.mime_type().map(str::to_owned),
+    }
 }

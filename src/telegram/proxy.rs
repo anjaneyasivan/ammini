@@ -447,7 +447,7 @@ fn telegram_cache_stream(
 }
 
 /// Flush the accumulated stream window to telemetry: one speed sample plus the
-/// byte/hit/miss deltas since the previous flush.
+/// hit/miss deltas since the previous flush.
 fn flush_stream_metrics(
     window_start: &mut std::time::Instant,
     window_bytes: &mut u64,
@@ -463,7 +463,6 @@ fn flush_stream_metrics(
         crate::telemetry::emit(TelemetryEvent::Metric(Metric::DownloadSpeed {
             bytes_per_sec: bytes as f64 / elapsed,
         }));
-        crate::telemetry::emit(TelemetryEvent::Metric(Metric::BytesDownloaded { bytes }));
         crate::telemetry::emit(TelemetryEvent::Metric(Metric::CacheHits { count: hits }));
         crate::telemetry::emit(TelemetryEvent::Metric(Metric::CacheMisses {
             count: misses,

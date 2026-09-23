@@ -169,11 +169,12 @@ UI.
 What is tracked: app start, Telegram sign-in / sign-out / login failures, the
 signed-in Telegram account's display name as the Sentry user context (username),
 played files (basename only — never full paths; Telegram videos also carry their
-size), Recent-menu picks (local files and Telegram videos), audio-track switches,
-playback errors, panics, background Telegram/proxy errors, and metrics (download
-speed — sampled twice a second per stream — plus byte, block-cache hit/miss,
-video counters, and seek latency: the time from an arrow / J / L / skip-button
-seek until playback resumes past the seek target).
+size plus metadata: duration, resolution and mime type), Recent-menu picks (local
+files and Telegram videos), audio-track switches, playback errors, panics,
+background Telegram/proxy errors, and metrics (download speed — sampled twice a
+second per stream — plus block-cache hit/miss, video counters, and seek latency:
+the time from an arrow / J / L / skip-button seek until playback resumes past the
+seek target).
 
 Telemetry is **off by default** and only activates when both of these are present in
 `.env` (resolved like the Telegram credentials: environment → `.env` → baked into the

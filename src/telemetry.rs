@@ -63,6 +63,15 @@ pub enum RecentKind {
     Telegram,
 }
 
+/// Media metadata for a Telegram video, attached to `TelegramVideoPlayed`.
+#[derive(Debug, Clone, Default)]
+pub struct VideoMeta {
+    pub duration_seconds: Option<f64>,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub mime: Option<String>,
+}
+
 /// The typed set of "important events" the app emits. Keep this small and curated —
 /// per-frame noise (poll reads, property warnings) stays in `tracing` only.
 #[derive(Debug, Clone)]
@@ -86,6 +95,7 @@ pub enum TelemetryEvent {
     TelegramVideoPlayed {
         file_name: String,
         size_bytes: Option<u64>,
+        meta: VideoMeta,
     },
     PlaybackStarted {
         source: PlaybackSource,
@@ -124,9 +134,6 @@ pub enum TelemetryEvent {
 pub enum Metric {
     DownloadSpeed {
         bytes_per_sec: f64,
-    },
-    BytesDownloaded {
-        bytes: u64,
     },
     BlocksDownloaded {
         count: u64,
@@ -542,10 +549,23 @@ impl TelemetryEvent {
             TelemetryEvent::TelegramVideoPlayed {
                 file_name,
                 size_bytes,
+                meta,
             } => {
                 let mut attrs = vec![KeyValue::new("file_name", file_name.clone())];
                 if let Some(size) = size_bytes {
                     attrs.push(KeyValue::new("size_bytes", *size as i64));
+                }
+                if let Some(duration) = meta.duration_seconds {
+                    attrs.push(KeyValue::new("duration_s", duration));
+                }
+                if let Some(width) = meta.width {
+                    attrs.push(KeyValue::new("width", width as i64));
+                }
+                if let Some(height) = meta.height {
+                    attrs.push(KeyValue::new("height", height as i64));
+                }
+                if let Some(mime) = &meta.mime {
+                    attrs.push(KeyValue::new("mime", mime.clone()));
                 }
                 (
                     "telegram.video_played",
@@ -767,9 +787,6 @@ fn capture_metric(metric: Metric) {
                 .attribute("unit", "bytes_per_sec")
                 .capture();
         }
-        Metric::BytesDownloaded { bytes } => {
-            metrics::counter("telegram.bytes.downloaded", bytes as f64).capture();
-        }
         Metric::BlocksDownloaded { count } => {
             metrics::counter("telegram.blocks.downloaded", count as f64).capture();
         }
@@ -885,10 +902,21 @@ mod tests {
         let record = TelemetryEvent::TelegramVideoPlayed {
             file_name: "screencast.mkv".into(),
             size_bytes: Some(1_000_000),
+            meta: VideoMeta {
+                duration_seconds: Some(93.5),
+                width: Some(1920),
+                height: Some(1080),
+                mime: Some("video/mp4".into()),
+            },
         }
         .to_record(&logger)
         .expect("event should map to a record");
+        assert_eq!(record.event_name(), Some("telegram.video_played"));
         assert_eq!(attr(&record, "size_bytes"), Some(1_000_000i64.into()));
+        assert_eq!(attr(&record, "duration_s"), Some(93.5f64.into()));
+        assert_eq!(attr(&record, "width"), Some(1920i64.into()));
+        assert_eq!(attr(&record, "height"), Some(1080i64.into()));
+        assert_eq!(attr(&record, "mime"), Some("video/mp4".into()));
     }
 
     #[test]

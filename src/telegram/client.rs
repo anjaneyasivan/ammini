@@ -96,6 +96,16 @@ impl TelegramClient {
         self.client.iter_messages(peer)
     }
 
+    /// Revoke the session server-side (best effort — the local file is deleted
+    /// separately by `session::delete_session`).
+    pub async fn sign_out(&self) -> Result<(), anyhow::Error> {
+        self.client
+            .sign_out()
+            .await
+            .map(|_| ())
+            .map_err(|e| anyhow::anyhow!("telegram sign-out failed: {e}"))
+    }
+
     pub fn clone_inner(&self) -> Client {
         self.client.clone()
     }

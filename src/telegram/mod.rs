@@ -135,7 +135,7 @@ async fn run_telegram(
         reqwest_client: reqwest::Client::new(),
         video_registry: video_registry.clone(),
         telegram_client: Some(client.clone_inner()),
-        cache_dir,
+        cache_dir: cache_dir.clone(),
         video_cache: video_cache.clone(),
     };
 
@@ -439,6 +439,17 @@ async fn run_telegram(
                 video_cache.lock().await.clear();
                 login_token = None;
                 password_token = None;
+                // Revoke the session server-side and delete the local session file and
+                // cached videos, so the next launch starts truly logged out.
+                if let Err(e) = client.sign_out().await {
+                    tracing::warn!("sign_out: {e}");
+                }
+                if let Err(e) = session::delete_session() {
+                    tracing::warn!("failed to delete session file: {e}");
+                }
+                if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
+                    tracing::warn!("failed to wipe cache dir {}: {e}", cache_dir.display());
+                }
                 let _ = ui_tx.send(UiMessage::NeedsAuth);
             }
         }

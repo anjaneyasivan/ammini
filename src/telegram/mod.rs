@@ -122,6 +122,13 @@ async fn run_telegram(
         .join("min-mpv")
         .join("telegram_cache");
 
+    // One GC pass per launch: expire stale videos and keep the directory under budget
+    // before the proxy can create new files.
+    match cache::sweep_cache_dir(&cache_dir, cache::CACHE_MAX_BYTES, cache::CACHE_MAX_AGE) {
+        Ok(removed) => tracing::info!("cache: swept {removed} bytes from {}", cache_dir.display()),
+        Err(e) => tracing::warn!("cache: sweep failed: {e}"),
+    }
+
     // Start the combined proxy server (remote URLs + Telegram videos). Telegram videos are
     // streamed through the per-video disk block cache.
     let proxy_state = ProxyState {

@@ -17,13 +17,25 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::{watch, Mutex};
+use tokio::sync::watch;
 
 /// Chunk size for both the Telegram download iterator and the on-disk block size.
 pub const BLOCK_SIZE: u64 = 512 * 1024;
+
+/// Default quota for the on-disk cache shared by all videos.
+pub const CACHE_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// Default max age for cached video files.
+pub const CACHE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+/// Magic bytes identifying a cache manifest file (see `BlockCache::save_manifest`).
+const MANIFEST_MAGIC: &[u8; 4] = b"MMCM";
+const MANIFEST_VERSION: u32 = 1;
+/// Binary header: magic(4) + version(4) + total_size(8) + block_count(8).
+const MANIFEST_HEADER_LEN: usize = 24;
 
 /// Byte extent of block `i`: `[i*BLOCK_SIZE, min((i+1)*BLOCK_SIZE, total_size)-1]`.
 pub fn block_extent(i: u64, total_size: u64) -> (u64, u64) {
@@ -46,6 +58,8 @@ pub struct BlockCache {
     /// Total size of the video in bytes.
     total_size: u64,
     /// Present blocks (indexes only; file offset is always `i * BLOCK_SIZE`).
+    // Metadata locks are scoped to single statements (never held across an `.await`),
+    // so plain std mutexes are safe and avoid `blocking_lock` panics inside the runtime.
     blocks: Arc<Mutex<HashSet<u64>>>,
     /// Blocks currently being downloaded, to deduplicate concurrent fills.
     in_flight: Arc<Mutex<HashSet<u64>>>,
@@ -55,20 +69,27 @@ pub struct BlockCache {
     /// subscribe and await `changed()`; the current value always reflects the latest
     /// state, so no completion can be missed.
     version: watch::Sender<u64>,
+    /// Serializes manifest rewrites so concurrent block stores never interleave writes.
+    meta_lock: Arc<Mutex<()>>,
 }
 
 impl BlockCache {
     /// Create a cache for a video, rooted at `cache_dir`. The backing file is created
-    /// lazily on the first write; `cache_dir` may be shared by many videos.
+    /// lazily on the first write; `cache_dir` may be shared by many videos. Coverage is
+    /// restored from a sidecar manifest written by a previous session, so blocks already
+    /// on disk are not re-downloaded.
     pub fn new(cache_dir: &Path, chat_id: i64, msg_id: i32, total_size: u64) -> Self {
-        Self {
+        let cache = Self {
             path: cache_dir.join(format!("{chat_id}_{msg_id}.bin")),
             total_size,
             blocks: Arc::new(Mutex::new(HashSet::new())),
             in_flight: Arc::new(Mutex::new(HashSet::new())),
             failed: Arc::new(Mutex::new(HashMap::new())),
             version: watch::channel(0).0,
-        }
+            meta_lock: Arc::new(std::sync::Mutex::new(())),
+        };
+        cache.load_manifest();
+        cache
     }
 
     pub fn total_size(&self) -> u64 {
@@ -77,7 +98,7 @@ impl BlockCache {
 
     /// Number of bytes cached on disk (sum of present block extents).
     pub async fn cached_bytes(&self) -> u64 {
-        let present = self.blocks.lock().await;
+        let present = self.blocks.lock().unwrap();
         present
             .iter()
             .map(|&i| {
@@ -85,6 +106,74 @@ impl BlockCache {
                 e - s + 1
             })
             .sum()
+    }
+
+    fn manifest_path(&self) -> PathBuf {
+        PathBuf::from(format!("{}.meta", self.path.display()))
+    }
+
+    /// Restore block coverage from the sidecar manifest, if any. Any mismatch (bad
+    /// magic/version, different total size, truncated bitmap, missing `.bin`) is treated
+    /// as "no coverage": the cache simply refills from the network.
+    fn load_manifest(&self) {
+        if !self.path.exists() {
+            return;
+        }
+        let Ok(bytes) = std::fs::read(self.manifest_path()) else {
+            return;
+        };
+        let block_count = block_count_for(self.total_size) as usize;
+        if bytes.len() != MANIFEST_HEADER_LEN + block_count.div_ceil(8)
+            || &bytes[0..4] != MANIFEST_MAGIC
+            || u32::from_le_bytes(bytes[4..8].try_into().unwrap()) != MANIFEST_VERSION
+            || u64::from_le_bytes(bytes[8..16].try_into().unwrap()) != self.total_size
+            || u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize != block_count
+        {
+            return;
+        }
+        let mut present = HashSet::new();
+        for (i, byte) in bytes[MANIFEST_HEADER_LEN..].iter().enumerate() {
+            for bit in 0..8 {
+                if byte & (1 << bit) != 0 {
+                    present.insert((i * 8 + bit) as u64);
+                }
+            }
+        }
+        let restored = present.len();
+        self.blocks.lock().unwrap().extend(present);
+        tracing::debug!(
+            "cache: restored {restored} blocks from {}",
+            self.manifest_path().display()
+        );
+    }
+
+    /// Atomically rewrite the manifest (tmp + rename) reflecting the current `blocks`
+    /// set. Serialized by `meta_lock` so concurrent block stores never interleave
+    /// writes; a failed write only costs reuse, never correctness.
+    fn save_manifest(&self) {
+        let _guard = self.meta_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let block_count = block_count_for(self.total_size);
+        let mut bytes = Vec::with_capacity(MANIFEST_HEADER_LEN + block_count.div_ceil(8) as usize);
+        bytes.extend_from_slice(MANIFEST_MAGIC);
+        bytes.extend_from_slice(&MANIFEST_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&self.total_size.to_le_bytes());
+        bytes.extend_from_slice(&block_count.to_le_bytes());
+        {
+            let present = self.blocks.lock().unwrap();
+            let mut bitmap = vec![0u8; block_count.div_ceil(8) as usize];
+            for &i in present.iter() {
+                if i < block_count {
+                    bitmap[i as usize / 8] |= 1 << (i % 8);
+                }
+            }
+            bytes.extend_from_slice(&bitmap);
+        }
+        let target = self.manifest_path();
+        let tmp = PathBuf::from(format!("{}.tmp", target.display()));
+        match std::fs::write(&tmp, &bytes).and_then(|_| std::fs::rename(&tmp, &target)) {
+            Ok(()) => {}
+            Err(e) => tracing::debug!("cache: manifest write failed for {}: {e}", target.display()),
+        }
     }
 
     /// Ensure block `block` is present in the cache, downloading it via `download` if
@@ -101,16 +190,16 @@ impl BlockCache {
     {
         loop {
             // Fast paths: block already present, or it previously failed.
-            if self.blocks.lock().await.contains(&block) {
+            if self.blocks.lock().unwrap().contains(&block) {
                 return Ok(());
             }
-            if let Some(msg) = self.failed.lock().await.get(&block).cloned() {
+            if let Some(msg) = self.failed.lock().unwrap().get(&block).cloned() {
                 return Err(anyhow::anyhow!("block {block} previously failed: {msg}"));
             }
 
             // Claim the download slot, or wait for whoever owns it.
             let claimed = {
-                let mut inflight = self.in_flight.lock().await;
+                let mut inflight = self.in_flight.lock().unwrap();
                 if inflight.contains(&block) {
                     false
                 } else {
@@ -124,8 +213,8 @@ impl BlockCache {
                 // re-check the state afterwards — the watch value is always current, so
                 // we cannot miss the owner's completion.
                 let mut rx = self.version.subscribe();
-                if self.blocks.lock().await.contains(&block)
-                    || self.failed.lock().await.contains_key(&block)
+                if self.blocks.lock().unwrap().contains(&block)
+                    || self.failed.lock().unwrap().contains_key(&block)
                 {
                     continue; // changed while subscribing; re-evaluate
                 }
@@ -135,12 +224,12 @@ impl BlockCache {
 
             // We own the slot. Defensive re-check (another task cannot own it, but the
             // block may have been stored between claim and here).
-            if self.blocks.lock().await.contains(&block) {
-                self.in_flight.lock().await.remove(&block);
+            if self.blocks.lock().unwrap().contains(&block) {
+                self.in_flight.lock().unwrap().remove(&block);
                 return Ok(());
             }
-            if let Some(msg) = self.failed.lock().await.get(&block).cloned() {
-                self.in_flight.lock().await.remove(&block);
+            if let Some(msg) = self.failed.lock().unwrap().get(&block).cloned() {
+                self.in_flight.lock().unwrap().remove(&block);
                 return Err(anyhow::anyhow!("block {block} previously failed: {msg}"));
             }
 
@@ -157,14 +246,15 @@ impl BlockCache {
 
             match &result {
                 Ok(()) => {
-                    self.blocks.lock().await.insert(block);
-                    self.failed.lock().await.remove(&block);
+                    self.blocks.lock().unwrap().insert(block);
+                    self.failed.lock().unwrap().remove(&block);
+                    self.save_manifest();
                 }
                 Err(e) => {
-                    self.failed.lock().await.insert(block, e.to_string());
+                    self.failed.lock().unwrap().insert(block, e.to_string());
                 }
             }
-            self.in_flight.lock().await.remove(&block);
+            self.in_flight.lock().unwrap().remove(&block);
             // Bump the version separately from send_replace: `*borrow()` holds the
             // watch's internal read lock for the whole statement, and send_replace takes
             // the write lock on the same rwlock — read guard + write lock on the same
@@ -179,7 +269,7 @@ impl BlockCache {
 
     /// Read a present block as `Bytes`, or `None` if it is not in the cache.
     pub async fn read_block(&self, block: u64) -> std::io::Result<Option<bytes::Bytes>> {
-        if !self.blocks.lock().await.contains(&block) {
+        if !self.blocks.lock().unwrap().contains(&block) {
             return Ok(None);
         }
         let (s, e) = block_extent(block, self.total_size);
@@ -190,6 +280,87 @@ impl BlockCache {
         file.read_exact(&mut buf).await?;
         Ok(Some(bytes::Bytes::from(buf)))
     }
+}
+
+/// Number of blocks a video of `total_size` bytes is split into.
+fn block_count_for(total_size: u64) -> u64 {
+    total_size.div_ceil(BLOCK_SIZE)
+}
+
+/// Delete a video file together with its manifest (and any stray tmp file).
+fn remove_file_pair(path: &Path) {
+    let _ = std::fs::remove_file(path);
+    let meta = PathBuf::from(format!("{}.meta", path.display()));
+    let _ = std::fs::remove_file(&meta);
+    let tmp = PathBuf::from(format!("{}.tmp", meta.display()));
+    let _ = std::fs::remove_file(tmp);
+}
+
+/// Garbage-collect the cache directory: drop `.bin` files (with their manifests) older
+/// than `max_age`, then delete oldest-by-mtime first until the remaining bytes fit
+/// under `max_bytes`. Orphaned `.meta`/`.tmp` files are removed. Returns the number of
+/// bytes deleted. Runs once at startup, before any new files can appear; a missing
+/// directory is not an error.
+pub fn sweep_cache_dir(dir: &Path, max_bytes: u64, max_age: Duration) -> std::io::Result<u64> {
+    let mut entries: Vec<(PathBuf, SystemTime, u64)> = Vec::new();
+    let mut orphaned_meta: Vec<PathBuf> = Vec::new();
+    match std::fs::read_dir(dir) {
+        Ok(iter) => {
+            for entry in iter.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "meta") {
+                    if !path.with_extension("bin").exists() {
+                        orphaned_meta.push(path);
+                    }
+                    continue;
+                }
+                if path.extension().is_some_and(|e| e == "tmp") {
+                    let _ = std::fs::remove_file(&path);
+                    continue;
+                }
+                if path.extension().is_some_and(|e| e == "bin") {
+                    if let Ok(meta) = entry.metadata() {
+                        if let Ok(mtime) = meta.modified() {
+                            entries.push((path, mtime, meta.len()));
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    }
+
+    let now = SystemTime::now();
+    let mut removed_bytes = 0u64;
+    entries.retain(|(path, mtime, len)| {
+        let stale = now.duration_since(*mtime).is_ok_and(|age| age > max_age);
+        if stale {
+            remove_file_pair(path);
+            removed_bytes += len;
+        }
+        !stale
+    });
+
+    let total: u64 = entries.iter().map(|(_, _, len)| *len).sum();
+    if total > max_bytes {
+        // Oldest first; `sort_by_key` is stable, so equal mtimes keep dir order.
+        entries.sort_by_key(|(_, mtime, _)| *mtime);
+        let mut remaining = total;
+        for (path, _, len) in entries {
+            remove_file_pair(&path);
+            remaining = remaining.saturating_sub(len);
+            removed_bytes += len;
+            if remaining <= max_bytes {
+                break;
+            }
+        }
+    }
+
+    for meta in orphaned_meta {
+        let _ = std::fs::remove_file(meta);
+    }
+    Ok(removed_bytes)
 }
 
 /// Write a whole block at `block * BLOCK_SIZE`, creating the file and its parent
@@ -212,12 +383,19 @@ async fn write_block_at(path: &Path, block: u64, bytes: &[u8]) -> std::io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::time::Duration;
 
+    /// Unique per call: tests run in parallel and would otherwise wipe each other's
+    /// directories (the fix for an intermittent NotFound in longer tests).
+    static DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
     fn temp_cache_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("min-mpv-cache-test-{}", std::process::id()));
+        let n = DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("min-mpv-cache-test-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
         dir
     }
 
@@ -318,6 +496,100 @@ mod tests {
         let err2 = cache.ensure(3, async { panic!("waiter must not retry") }).await;
         assert!(err2.is_err());
         assert!(err2.unwrap_err().to_string().contains("boom"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A reopened cache (new session, same video ids) must restore block coverage from
+    /// the manifest and serve stored blocks from disk without re-downloading.
+    #[tokio::test]
+    async fn manifest_restores_blocks_on_reopen() {
+        let dir = temp_cache_dir();
+        let total = 8 * BLOCK_SIZE;
+        let cache = BlockCache::new(&dir, 1, 2, total);
+        cache
+            .ensure(3, async { Ok(vec![9u8; BLOCK_SIZE as usize]) })
+            .await
+            .unwrap();
+        cache
+            .ensure(7, async { Ok(vec![1u8; BLOCK_SIZE as usize]) })
+            .await
+            .unwrap();
+
+        let reopened = BlockCache::new(&dir, 1, 2, total);
+        assert!(reopened.read_block(3).await.unwrap().is_some());
+        assert!(reopened.read_block(7).await.unwrap().is_some());
+        // Present blocks must never invoke the download closure.
+        reopened
+            .ensure(3, async { panic!("must not re-download") })
+            .await
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A manifest recording a different total size refers to different content and must
+    /// be ignored, so the block is fetched again.
+    #[tokio::test]
+    async fn manifest_ignored_when_size_mismatches() {
+        let dir = temp_cache_dir();
+        let cache = BlockCache::new(&dir, 1, 2, 8 * BLOCK_SIZE);
+        cache
+            .ensure(0, async { Ok(vec![7u8; BLOCK_SIZE as usize]) })
+            .await
+            .unwrap();
+
+        let reopened = BlockCache::new(&dir, 1, 2, 16 * BLOCK_SIZE);
+        let mut downloaded = false;
+        reopened
+            .ensure(0, async {
+                downloaded = true;
+                Ok(vec![7u8; BLOCK_SIZE as usize])
+            })
+            .await
+            .unwrap();
+        assert!(downloaded, "mismatched manifest must not prevent download");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sweep_removes_stale_and_oversized_files() {
+        let dir = temp_cache_dir();
+
+        let stale = dir.join("1_1.bin");
+        std::fs::write(&stale, vec![0u8; 1000]).unwrap();
+        let stale_time = SystemTime::now() - Duration::from_secs(40 * 24 * 3600);
+        std::fs::File::options()
+            .write(true)
+            .open(&stale)
+            .unwrap()
+            .set_modified(stale_time)
+            .unwrap();
+
+        let fresh_a = dir.join("2_2.bin");
+        let fresh_b = dir.join("3_3.bin");
+        std::fs::write(&fresh_a, vec![0u8; 2000]).unwrap();
+        std::fs::write(&fresh_b, vec![0u8; 3000]).unwrap();
+        std::fs::write(dir.join("2_2.bin.meta"), b"junk").unwrap();
+        std::fs::write(dir.join("4_4.bin.tmp"), b"x").unwrap();
+
+        let removed = sweep_cache_dir(&dir, 2500, Duration::from_secs(30 * 24 * 3600)).unwrap();
+
+        assert!(!stale.exists(), "stale file must be deleted");
+        // Budget after removing `stale` is 5000 bytes, cap 2500: both fresh files go too.
+        assert!(!fresh_a.exists());
+        assert!(!fresh_b.exists());
+        assert!(!dir.join("2_2.bin.meta").exists(), "manifest must go with its video");
+        assert!(!dir.join("4_4.bin.tmp").exists(), "stray tmp file must be removed");
+        assert_eq!(removed, 6000);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sweep_missing_dir_is_not_an_error() {
+        let dir = temp_cache_dir();
+        assert_eq!(
+            sweep_cache_dir(&dir, 100, Duration::from_secs(60)).unwrap(),
+            0
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 
+use min_mpv::telegram::cache::BlockCache;
 use min_mpv::telegram::client::{find_first_hevc_video, is_hevc_video, TelegramClient};
 use min_mpv::telegram::config::TelegramConfig;
 use min_mpv::telegram::proxy::{start_server, ProxyState};
@@ -76,12 +77,15 @@ async fn find_first_hevc_video_and_test_proxy_range() {
     let mut registry = HashMap::new();
     registry.insert(video.msg_id, video.clone());
     let video_registry = Arc::new(Mutex::new(registry));
+    let video_cache: Arc<Mutex<HashMap<i32, BlockCache>>> = Arc::new(Mutex::new(HashMap::new()));
 
-    // Telegram videos are streamed straight from the network; no cache involved.
+    // Telegram videos are served through the shared disk block cache.
     let proxy_state = ProxyState {
         reqwest_client: reqwest::Client::new(),
         video_registry: video_registry.clone(),
         telegram_client: Some(client.clone_inner()),
+        cache_dir: std::env::temp_dir().join("min-mpv-test-telegram-cache"),
+        video_cache: video_cache.clone(),
     };
 
     let port = start_server(proxy_state).await.expect("proxy server failed to start");
@@ -139,5 +143,18 @@ async fn find_first_hevc_video_and_test_proxy_range() {
     assert_eq!(content_range, expected_range);
     let body = res.bytes().await.unwrap();
     assert!(!body.is_empty());
+    assert_eq!(body.len() as u64, tail_len);
+
+    // 4. Repeat the same tail range request. The blocks are now on disk from step 3,
+    // so this must be served from the cache (and therefore complete quickly).
+    let res = reqwest::Client::new()
+        .get(&base)
+        .header("Range", format!("bytes={}-", tail_start))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .expect("cached tail range request failed");
+    assert_eq!(res.status(), reqwest::StatusCode::PARTIAL_CONTENT);
+    let body = res.bytes().await.unwrap();
     assert_eq!(body.len() as u64, tail_len);
 }

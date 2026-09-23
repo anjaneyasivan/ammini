@@ -16,14 +16,18 @@
 - Telegram runs on a background `std::thread` with its own tokio runtime (`telegram::start()`). UI ↔ background communicate only via two unbounded mpsc channels: `BgCommand` (UI→BG) and `UiMessage` (BG→UI); `main.rs` drains `ui_rx` with `try_recv()` once per frame.
 - The real proxy is `src/telegram/proxy.rs` (NOT `src/proxy.rs`, which only builds proxied URLs via `local_url_for`). It's an axum server on `127.0.0.1:0` that reports its port via `UiMessage::ProxyReady`, serving:
   - `/url?url=<encoded>` — generic remote URL proxy with request/response header whitelists.
-  - `/telegram/{msg_id}` — streams Telegram video bytes straight from the network with byte-range support. There is intentionally NO disk cache (a past commit removed it).
-- The bg thread keeps `video_registry: HashMap<i32, VideoDownloadInfo>` (msg_id → document) that the proxy reads to stream; cleared on chat switch/sign-out.
+  - `/telegram/{msg_id}` — streams Telegram video bytes with byte-range support through a **disk-backed block cache** (`src/telegram/cache.rs`). Videos are cached as 512 KiB blocks in per-video files under the OS cache dir (`~/Library/Caches/min-mpv/telegram_cache/{chat_id}_{msg_id}.bin`); RAM holds only coverage metadata. Concurrent range requests deduplicate downloads via an in-flight set + a `watch` version counter (waiter coordination — don't switch to a raw `Notify`, it misses completions). Blocks are written whole and chunk-aligned, so no partial-range bookkeeping.
+- The bg thread keeps `video_registry: HashMap<i32, VideoDownloadInfo>` (msg_id → document metadata) and `video_cache: HashMap<i32, BlockCache>`; both are cleared on chat switch/sign-out.
+- Custom font stack in `src/fonts.rs`: bundled NotoEmoji (Unicode 15+, covers ZWJ sequences, skin tones, flags) + bundled DejaVu Sans (symbols/dingbats/arrows), plus best-effort system script fallbacks (CJK deliberately skipped on macOS to keep startup/memory light).
 
 ## Testing
-- Fast offline suite: `cargo test --lib` (unit tests in `client.rs`/`proxy.rs`/`state_machine.rs`).
+- Fast offline suite: `cargo test --lib` (unit tests in `cache.rs`/`client.rs`/`proxy.rs`/`state_machine.rs`).
 - `tests/hevc_proxy.rs` is a live-Telegram integration test. It auto-skips (prints "Skipping test…") when env config, an authorized session, or an HEVC video is missing, but it panics on some real failures and can be slow (scans all dialogs/messages; tail range request has a 120s timeout). A plain `cargo test` includes it — run it deliberately with `cargo test --test hevc_proxy`.
+- `tests/emoji_support.rs` is an offline test verifying the font stack: bundled NotoEmoji covers common/modern emojis, and system script fallbacks are checked conditionally so it passes on any platform.
 - Telegram session: SQLite at `dirs::data_local_dir()/min-mpv/telegram.session` (macOS: `~/Library/Application Support/min-mpv/telegram.session`), auto-persisted. UI "Sign out" clears in-memory state but does NOT delete the file (`session::delete_session()` exists but is unwired).
 - Recent-files UI state persists via eframe storage key `min_mpv_state`.
 
 ## Gotchas
 - Shortcuts not in the README: `Cmd+U` opens the URL dialog, `Cmd+T` toggles the Telegram panel.
+- `cargo build` prints a future-incompat warning about `proc-macro-error2` (transitive dep of `statig_macro`/`statig`: `pub use proc_macro` at lib.rs:494, Rust issue #127909). It is harmless and deliberately ignored — the proc-macro-error2 repo is archived, `statig` main still pins 2.0.1, and there is no newer fixed version. Don't try to "fix" it by bumping/patching deps; revisit only if a future Rust promotes E0365 to a hard error.
+- `egui` panics at startup if any registered font fails to parse — only add fonts that are guaranteed to exist (see note in `src/fonts.rs`).

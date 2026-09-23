@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod client;
 pub mod config;
 pub mod panel;
@@ -111,13 +112,24 @@ async fn run_telegram(
 
     let video_registry: Arc<tokio::sync::Mutex<HashMap<i32, client::VideoDownloadInfo>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let video_cache: Arc<tokio::sync::Mutex<HashMap<i32, cache::BlockCache>>> =
+        Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+
+    // Cache directory for the disk block cache. Per-video files are created lazily on
+    // first request and evicted with `video_registry` on chat switch/sign-out.
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::env::temp_dir())
+        .join("min-mpv")
+        .join("telegram_cache");
 
     // Start the combined proxy server (remote URLs + Telegram videos). Telegram videos are
-    // streamed straight from the network by the proxy, with no on-disk cache.
+    // streamed through the per-video disk block cache.
     let proxy_state = ProxyState {
         reqwest_client: reqwest::Client::new(),
         video_registry: video_registry.clone(),
         telegram_client: Some(client.clone_inner()),
+        cache_dir,
+        video_cache: video_cache.clone(),
     };
 
     let proxy_port = match start_server(proxy_state).await {
@@ -317,6 +329,7 @@ async fn run_telegram(
                 let chat_id = peer_ref.id.bot_api_dialog_id().unwrap_or(0);
                 selected_chat_id = Some(chat_id);
                 video_registry.lock().await.clear();
+                video_cache.lock().await.clear();
 
                 let mut iter = client.iter_messages(peer_ref);
                 match client::next_messages_page(
@@ -377,6 +390,7 @@ async fn run_telegram(
                 messages_iter = None;
                 selected_chat_id = None;
                 video_registry.lock().await.clear();
+                video_cache.lock().await.clear();
             }
             BgCommand::PlayVideo(msg_id) => {
                 let video = {
@@ -415,6 +429,7 @@ async fn run_telegram(
                 messages_iter = None;
                 selected_chat_id = None;
                 video_registry.lock().await.clear();
+                video_cache.lock().await.clear();
                 login_token = None;
                 password_token = None;
                 let _ = ui_tx.send(UiMessage::NeedsAuth);

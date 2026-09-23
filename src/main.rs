@@ -98,6 +98,8 @@ impl MinMpvApp {
         // Material icon glyphs must be registered AFTER `fonts::install` (which uses
         // `set_fonts` and would replace them); `initialize` uses `add_font`, which merges.
         egui_material_icons::initialize(&cc.egui_ctx);
+        // macOS-style spacing/radii/theme after the fonts are in place.
+        min_mpv::style::install(&cc.egui_ctx);
 
         let player = PlayerState::new(cc).map_err(|e| {
             Box::new(std::io::Error::other(format!(

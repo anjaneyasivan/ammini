@@ -8,6 +8,12 @@ use std::sync::Arc;
 use eframe::egui;
 use egui_material_icons::MaterialIcon;
 
+/// Inter (variable), the primary text face — a free San Francisco substitute, per the
+/// macOS style guide.
+///
+/// Source: rsms/inter v4.1, SIL Open Font License 1.1 (see `assets/fonts/OFL-Inter.txt`).
+const INTER: &[u8] = include_bytes!("../assets/fonts/InterVariable.ttf");
+
 /// Modern monochrome Noto Emoji (variable weight), covering emojis through Unicode 15+
 /// including ZWJ sequences, skin tones and flags.
 ///
@@ -111,6 +117,10 @@ pub fn font_definitions() -> egui::FontDefinitions {
         "DejaVuSans".to_owned(),
         Arc::new(egui::FontData::from_static(DEJA_VU_SANS)),
     );
+    defs.font_data.insert(
+        "Inter".to_owned(),
+        Arc::new(egui::FontData::from_static(INTER)),
+    );
 
     // DejaVu Sans sits right after the emoji font: it picks up symbols/arrows/dingbats
     // the emoji font doesn't cover, before egui's (outdated) builtins or script fallbacks.
@@ -135,6 +145,9 @@ pub fn font_definitions() -> egui::FontDefinitions {
 
     for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
         let list = defs.families.get_mut(&family).unwrap();
+        // Inter is the primary face; our emoji/symbol/script fallbacks sit right after
+        // it, ahead of egui's builtin fonts.
+        list.insert(0, "Inter".to_owned());
         list.splice(1..1, fallbacks.iter().cloned());
     }
 

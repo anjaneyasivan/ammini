@@ -2,7 +2,10 @@ use eframe::{App, Frame, NativeOptions, egui};
 use egui_material_icons::icons::*;
 use egui_sharkplayer::{PlayerState, SharkPlayer};
 use min_mpv::fonts::icon_label;
-use min_mpv::fsm::{PersistentState, PlayerEvent, PlayerFsm, audio_track_label};
+use min_mpv::fsm::{
+    PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, audio_track_label,
+    record_recent_telegram,
+};
 use min_mpv::telegram::config::TelegramConfig;
 use min_mpv::telegram::panel::TelegramPanel;
 use min_mpv::telegram::state_machine::{TelegramEvent, TelegramFsm};
@@ -465,6 +468,22 @@ impl MinMpvApp {
                         clear_resume = true;
                     }
                 }
+                if !self.fsm.persistent.recent_telegram.is_empty() {
+                    ui.separator();
+                    ui.weak("Recent Telegram files");
+                    for entry in self.fsm.persistent.recent_telegram.clone() {
+                        let label = format!("{} · {}", entry.chat_name, truncate_path(&entry.name));
+                        if ui.button(icon_label(ICON_PLAY_ARROW, &label)).clicked() {
+                            if let Some(bg) = &self.bg_tx {
+                                let _ = bg.send(BgCommand::PlayTelegramVideo {
+                                    peer: entry.peer,
+                                    msg_id: entry.msg_id,
+                                });
+                            }
+                            ui.close();
+                        }
+                    }
+                }
             });
             if clear_resume {
                 // SAFETY: resume positions are plain UI data, not state-machine invariants.
@@ -504,10 +523,30 @@ impl App for MinMpvApp {
                     info!("proxy ready at {url}");
                     *self.proxy_url_mut() = Some(url);
                 }
-                UiMessage::VideoReady { msg_id, url } => {
+                UiMessage::VideoReady { msg_id, url, name } => {
                     info!("telegram: video ready msg_id={msg_id} url={url}");
                     self.telegram_fsm.handle(&TelegramEvent::VideoReady);
                     events.push(PlayerEvent::OpenTelegramUrl(url));
+                    // Remember it in the recent-Telegram list (requires the current chat; the
+                    // peer holds the access hash needed to refetch on replay).
+                    if let Some(peer) = self.telegram_fsm.data.selected_chat {
+                        let chat_name = self
+                            .telegram_fsm
+                            .data
+                            .selected_chat_name
+                            .clone()
+                            .unwrap_or_else(|| "Chat".to_string());
+                        let entry = RecentTelegram {
+                            peer,
+                            chat_name,
+                            msg_id,
+                            name,
+                        };
+                        // SAFETY: recent-Telegram entries are plain UI data, not
+                        // state-machine invariants.
+                        let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
+                        record_recent_telegram(&mut persistent.recent_telegram, entry);
+                    }
                 }
                 UiMessage::VideoError(e) => {
                     self.telegram_fsm.handle(&TelegramEvent::VideoError(e));

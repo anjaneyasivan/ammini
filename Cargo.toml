@@ -21,7 +21,9 @@ chrono = "0.4"
 dirs = "5"
 dotenvy = "0.15"
 grammers-client = "0.10"
-grammers-session = "0.10"
+# serde feature: lets us persist PeerRef (with its access hash) in recent_telegram so
+# replays work for channels, not just peers the session knows implicitly.
+grammers-session = { version = "0.10", features = ["serde"] }
 anyhow = "1"
 bytes = "1"
 tokio-stream = "0.1"

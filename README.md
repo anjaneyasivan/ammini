@@ -13,7 +13,9 @@ Telegram account.
   streams (title/language), with the active one checked; picking another switches mpv
   to it.
 - **Persistent state across restarts**: recent files, the current playlist and track,
-  volume, and per-file resume positions (local files only).
+  volume, per-file resume positions (local files only), and a "Recent Telegram files"
+  section in the Recent menu — recently played Telegram videos are replayed by
+  refetching their message, so they work even after a restart or chat switch.
 - Telegram sidebar (`Cmd+T`): phone/2FA sign-in, chat list, message list with video
   playback, load-more pagination, and real sign-out (revokes the session and wipes local
   data).
@@ -110,7 +112,9 @@ When the video surface has keyboard focus, the mpv overlay controls apply instea
   session file and all cached videos — the next launch starts logged out.
 - Chats and messages paginate with the "Load more" buttons. Messages with videos show a
   play button; playing one streams it through the local proxy, so seeking and scrubbing
-  work like a local file.
+  work like a local file. Played videos appear under **Recent → Recent Telegram files**
+  and can be replayed from there at any time (the message is refetched on demand, so
+  this survives restarts and chat switches).
 - Telegram videos are cached under `~/Library/Caches/min-mpv/telegram_cache/`
   (`{chat_id}_{msg_id}.bin` + a manifest). The cache is reused across restarts and
   swept automatically (files older than 30 days, or the oldest files beyond a 2 GiB

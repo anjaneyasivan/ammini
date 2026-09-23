@@ -14,6 +14,19 @@ const RESUME_WRITE_INTERVAL: Duration = Duration::from_secs(1);
 const RESUME_MIN_SECONDS: f64 = 3.0;
 /// Upper bound on tracked resume positions; the map is cleared when exceeded.
 const RESUME_MAX_ENTRIES: usize = 200;
+/// Cap for the recent-Telegram list (same as recent files).
+const RECENT_TELEGRAM_MAX: usize = 10;
+
+/// A recently played Telegram video. The proxy URL is session-scoped (the port changes
+/// every launch), so we persist the peer (holds the access hash) + message id and
+/// refetch on replay.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecentTelegram {
+    pub peer: grammers_session::types::PeerRef,
+    pub chat_name: String,
+    pub msg_id: i32,
+    pub name: String,
+}
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PersistentState {
@@ -31,6 +44,10 @@ pub struct PersistentState {
     /// session-scoped and would be stale on the next launch).
     #[serde(default)]
     pub resume: HashMap<String, f64>,
+    /// Recently played Telegram videos (most recent first), replayed by refetching the
+    /// message via its chat + message ids.
+    #[serde(default)]
+    pub recent_telegram: Vec<RecentTelegram>,
 }
 
 pub struct PlayerFsm {
@@ -313,9 +330,30 @@ pub fn audio_track_label(title: Option<String>, lang: Option<String>, index: usi
     }
 }
 
+/// Move `entry` to the front of the recent-Telegram list (deduped by msg_id), capped at
+/// `RECENT_TELEGRAM_MAX` entries.
+pub fn record_recent_telegram(recent: &mut Vec<RecentTelegram>, entry: RecentTelegram) {
+    recent.retain(|r| r.msg_id != entry.msg_id);
+    recent.insert(0, entry);
+    recent.truncate(RECENT_TELEGRAM_MAX);
+}
+
 #[cfg(test)]
 mod tests {
-    use super::audio_track_label;
+    use super::{RecentTelegram, audio_track_label, record_recent_telegram};
+    use grammers_session::types::{PeerAuth, PeerId, PeerRef};
+
+    fn entry(msg_id: i32, name: &str) -> RecentTelegram {
+        RecentTelegram {
+            peer: PeerRef {
+                id: PeerId::user(1).unwrap(),
+                auth: PeerAuth::default(),
+            },
+            chat_name: "Chat".into(),
+            msg_id,
+            name: name.into(),
+        }
+    }
 
     #[test]
     fn audio_track_label_prefers_title() {
@@ -337,5 +375,36 @@ mod tests {
     fn audio_track_label_falls_back_to_lang_and_index() {
         assert_eq!(audio_track_label(None, Some("ja".into()), 3), "ja");
         assert_eq!(audio_track_label(None, None, 4), "Track 5");
+    }
+
+    #[test]
+    fn recent_telegram_dedupes_and_moves_to_front() {
+        let mut recent = Vec::new();
+        record_recent_telegram(&mut recent, entry(1, "a.mp4"));
+        record_recent_telegram(&mut recent, entry(2, "b.mp4"));
+        record_recent_telegram(&mut recent, entry(1, "a.mp4"));
+        let ids: Vec<i32> = recent.iter().map(|r| r.msg_id).collect();
+        assert_eq!(ids, vec![1, 2]);
+    }
+
+    #[test]
+    fn recent_telegram_is_capped() {
+        let mut recent = Vec::new();
+        for i in 0..25 {
+            record_recent_telegram(&mut recent, entry(i, "v.mp4"));
+        }
+        assert_eq!(recent.len(), 10);
+        assert_eq!(recent.first().unwrap().msg_id, 24);
+        assert_eq!(recent.last().unwrap().msg_id, 15);
+    }
+
+    #[test]
+    fn recent_telegram_survives_serde_round_trip() {
+        let entry = entry(7, "clip.mkv");
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: RecentTelegram = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.peer, entry.peer);
+        assert_eq!(back.msg_id, 7);
+        assert_eq!(back.name, "clip.mkv");
     }
 }

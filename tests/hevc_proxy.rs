@@ -61,7 +61,7 @@ async fn find_first_hevc_video_and_test_proxy_range() {
     };
     assert!(authorized);
 
-    let video = match find_first_hevc_video(&client).await {
+    let (peer, video) = match find_first_hevc_video(&client).await {
         Ok(Some(v)) => v,
         Ok(None) => {
             eprintln!("Skipping test: no HEVC video found in any chat");
@@ -78,6 +78,14 @@ async fn find_first_hevc_video_and_test_proxy_range() {
         video.msg_id, video.size, name
     );
     assert!(is_hevc_video(&video));
+
+    // The recent-Telegram replay path refetches with the stored peer (access hash);
+    // verify it recovers the same document.
+    let by_id = min_mpv::telegram::client::fetch_video_info(&client, peer, video.msg_id)
+        .await
+        .expect("failed to refetch video by id");
+    assert_eq!(by_id.msg_id, video.msg_id);
+    assert_eq!(by_id.size, video.size);
 
     let mut registry = HashMap::new();
     registry.insert(video.msg_id, video.clone());

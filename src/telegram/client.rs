@@ -177,6 +177,36 @@ pub async fn download_block(
     }
 }
 
+/// Fetch a single message by id and build its [`VideoDownloadInfo`]. Used to replay a
+/// recently played video after its registry entry was cleared (chat switch/sign-out).
+/// `peer` must carry the session's authority for the chat (e.g. the `PeerRef` stored
+/// when the video was first played) — an ambient/default-authority ref is rejected for
+/// channels.
+pub async fn fetch_video_info(
+    client: &TelegramClient,
+    peer: PeerRef,
+    msg_id: i32,
+) -> Result<VideoDownloadInfo, anyhow::Error> {
+    let chat_id = peer.id.bot_api_dialog_id().unwrap_or(0);
+    let mut fetched = client
+        .inner()
+        .get_messages_by_id(peer, &[msg_id])
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to fetch message {msg_id}: {e}"))?;
+    let msg = fetched
+        .pop()
+        .flatten()
+        .ok_or_else(|| anyhow::anyhow!("message {msg_id} not found"))?;
+    let (is_video, video) = extract_video(&msg, chat_id);
+    let video = video.ok_or_else(|| anyhow::anyhow!("message {msg_id} contains no video"))?;
+    if !is_video || video.size == 0 {
+        return Err(anyhow::anyhow!(
+            "message {msg_id} contains no playable video"
+        ));
+    }
+    Ok(video)
+}
+
 /// Fetch the next page of dialogs from the iterator.
 /// Returns (dialogs, has_more).
 pub async fn next_dialogs_page(
@@ -361,19 +391,24 @@ pub fn is_hevc_video(video: &VideoDownloadInfo) -> bool {
 
 /// Search all dialogs for the first message containing an HEVC video.
 /// Returns `Ok(None)` if authorized but no HEVC video was found.
-pub async fn find_first_hevc_video(client: &TelegramClient) -> Result<Option<VideoDownloadInfo>> {
+/// Find the first HEVC video in the user's chats, returning its dialog peer (needed to
+/// refetch the message later) alongside the video info.
+pub async fn find_first_hevc_video(
+    client: &TelegramClient,
+) -> Result<Option<(PeerRef, VideoDownloadInfo)>> {
     let mut dialogs_iter = client.iter_dialogs();
     loop {
         let (dialogs, has_more_dialogs) =
             next_dialogs_page(&mut dialogs_iter, DIALOG_PAGE_SIZE).await?;
         for dialog in dialogs {
-            let chat_id = dialog.peer_ref.id.bot_api_dialog_id().unwrap_or(0);
-            let mut messages_iter = client.iter_messages(dialog.peer_ref);
+            let peer = dialog.peer_ref;
+            let chat_id = peer.id.bot_api_dialog_id().unwrap_or(0);
+            let mut messages_iter = client.iter_messages(peer);
             loop {
                 let (_, videos, has_more_messages) =
                     next_messages_page(&mut messages_iter, MESSAGE_PAGE_SIZE, chat_id).await?;
                 if let Some(video) = videos.into_iter().find(is_hevc_video) {
-                    return Ok(Some(video));
+                    return Ok(Some((peer, video)));
                 }
                 if !has_more_messages {
                     break;

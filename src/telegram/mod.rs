@@ -42,6 +42,8 @@ pub enum UiMessage {
     VideoReady {
         msg_id: i32,
         url: String,
+        /// Display name of the video document (for the recent-Telegram list).
+        name: String,
     },
     VideoError(String),
     Error(String),
@@ -59,6 +61,12 @@ pub enum BgCommand {
     LoadMoreMessages,
     BackToChatList,
     PlayVideo(i32),
+    /// Replay a recently played video by refetching its message (the registry may
+    /// have been cleared by a chat switch/sign-out since it was last played).
+    PlayTelegramVideo {
+        peer: PeerRef,
+        msg_id: i32,
+    },
     StopVideo,
     SignOut,
 }
@@ -407,10 +415,28 @@ async fn run_telegram(
                     continue;
                 }
 
-                // No cache and no background download: the proxy streams the video straight
-                // from Telegram to the player as the player requests bytes.
+                // The proxy streams the video straight from Telegram to the player as
+                // the player requests bytes.
                 let url = format!("http://127.0.0.1:{}/telegram/{}", proxy_port, msg_id);
-                let _ = ui_tx.send(UiMessage::VideoReady { msg_id, url });
+                let name = video_display_name(&video.document);
+                let _ = ui_tx.send(UiMessage::VideoReady { msg_id, url, name });
+            }
+            BgCommand::PlayTelegramVideo { peer, msg_id } => {
+                // The registry may have been cleared since the video was last played, so
+                // refetch the message and re-register its document before streaming.
+                match client::fetch_video_info(&client, peer, msg_id).await {
+                    Ok(video) => {
+                        video_registry.lock().await.insert(msg_id, video.clone());
+                        let url = format!("http://127.0.0.1:{}/telegram/{}", proxy_port, msg_id);
+                        let name = video_display_name(&video.document);
+                        let _ = ui_tx.send(UiMessage::VideoReady { msg_id, url, name });
+                    }
+                    Err(e) => {
+                        tracing::warn!("telegram: replay msg_id={msg_id} failed: {e}");
+                        let _ =
+                            ui_tx.send(UiMessage::VideoError(format!("Failed to load video: {e}")));
+                    }
+                }
             }
             BgCommand::StopVideo => {
                 tracing::debug!("telegram: StopVideo (no-op)");
@@ -439,4 +465,12 @@ async fn run_telegram(
             }
         }
     }
+}
+
+/// Display name for a Telegram video document, falling back to "video".
+fn video_display_name(document: &client::Document) -> String {
+    document
+        .name()
+        .map(str::to_owned)
+        .unwrap_or_else(|| "video".to_string())
 }

@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
+    Router,
     body::Body,
     extract::{Path, Query, State},
-    http::{header, HeaderMap, Method, Request, Response, StatusCode},
+    http::{HeaderMap, Method, Request, Response, StatusCode, header},
     response::Response as AxumResponse,
     routing::get,
-    Router,
 };
 use bytes::Bytes;
 use reqwest::Client as ReqwestClient;
@@ -65,7 +65,10 @@ pub struct ProxyState {
 pub async fn start_server(state: ProxyState) -> anyhow::Result<u16> {
     let app = Router::new()
         .route("/url", get(handle_url).head(handle_url))
-        .route("/telegram/{msg_id}", get(handle_telegram).head(handle_telegram))
+        .route(
+            "/telegram/{msg_id}",
+            get(handle_telegram).head(handle_telegram),
+        )
         .with_state(Arc::new(state));
 
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -237,7 +240,12 @@ async fn handle_telegram(
     };
 
     let stream = telegram_cache_stream(source, cache, video.document.clone(), start, end);
-    build_telegram_response(status, content_range, content_length, Body::from_stream(stream))
+    build_telegram_response(
+        status,
+        content_range,
+        content_length,
+        Body::from_stream(stream),
+    )
 }
 
 fn build_telegram_response(
@@ -353,7 +361,10 @@ fn telegram_cache_stream(
                 let source = source.clone();
                 let doc = document.clone();
                 if let Err(e) = cache
-                    .ensure(block, async move { source.download_block(&doc, block).await })
+                    .ensure(
+                        block,
+                        async move { source.download_block(&doc, block).await },
+                    )
                     .await
                 {
                     break Err(e);
@@ -371,13 +382,12 @@ fn telegram_cache_stream(
             // Trim to the requested window. The final block may be partial, so
             // `end_idx` is bounded by the actual block length.
             let start_idx = if block == first_block { trim_prefix } else { 0 };
-            let end_idx = bytes
-                .len()
-                .saturating_sub(if block == last_block { trim_suffix } else { 0 });
-            if start_idx < end_idx {
-                if tx.send(Ok(bytes.slice(start_idx..end_idx))).await.is_err() {
-                    return; // player went away
-                }
+            let end_idx =
+                bytes
+                    .len()
+                    .saturating_sub(if block == last_block { trim_suffix } else { 0 });
+            if start_idx < end_idx && tx.send(Ok(bytes.slice(start_idx..end_idx))).await.is_err() {
+                return; // player went away
             }
         }
     });
@@ -419,7 +429,14 @@ mod tests {
 
     /// Trim a full block's bytes down to the requested range window. `block` is the block
     /// index, `start`/`end` the requested byte window, `total_size` the file size.
-    fn trim_block(block: u64, first_block: u64, last_block: u64, trim_prefix: usize, trim_suffix: usize, bytes: &[u8]) -> &[u8] {
+    fn trim_block(
+        block: u64,
+        first_block: u64,
+        last_block: u64,
+        trim_prefix: usize,
+        trim_suffix: usize,
+        bytes: &[u8],
+    ) -> &[u8] {
         let start_idx = if block == first_block { trim_prefix } else { 0 };
         let end_idx = bytes
             .len()
@@ -433,7 +450,8 @@ mod tests {
         let first_block = *r.start();
         let last_block = *r.end();
         let trim_prefix = (start - first_block * DOWNLOAD_CHUNK_SIZE) as usize;
-        let trim_suffix = (((last_block + 1) * DOWNLOAD_CHUNK_SIZE).min(total_size) - 1 - end) as usize;
+        let trim_suffix =
+            (((last_block + 1) * DOWNLOAD_CHUNK_SIZE).min(total_size) - 1 - end) as usize;
         (first_block, last_block, trim_prefix, trim_suffix)
     }
 

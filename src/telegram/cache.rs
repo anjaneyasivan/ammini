@@ -318,12 +318,11 @@ pub fn sweep_cache_dir(dir: &Path, max_bytes: u64, max_age: Duration) -> std::io
                     let _ = std::fs::remove_file(&path);
                     continue;
                 }
-                if path.extension().is_some_and(|e| e == "bin") {
-                    if let Ok(meta) = entry.metadata() {
-                        if let Ok(mtime) = meta.modified() {
-                            entries.push((path, mtime, meta.len()));
-                        }
-                    }
+                if path.extension().is_some_and(|e| e == "bin")
+                    && let Ok(meta) = entry.metadata()
+                    && let Ok(mtime) = meta.modified()
+                {
+                    entries.push((path, mtime, meta.len()));
                 }
             }
         }
@@ -369,12 +368,16 @@ async fn write_block_at(path: &Path, block: u64, bytes: &[u8]) -> std::io::Resul
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
+    // Never truncate: blocks are written at their own offsets and the file may already
+    // hold other blocks (or a manifest-driven partial reuse).
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(false)
         .open(path)
         .await?;
-    file.seek(std::io::SeekFrom::Start(block * BLOCK_SIZE)).await?;
+    file.seek(std::io::SeekFrom::Start(block * BLOCK_SIZE))
+        .await?;
     file.write_all(bytes).await?;
     file.flush().await?;
     Ok(())
@@ -491,9 +494,13 @@ mod tests {
     async fn failed_block_propagates_to_waiters() {
         let dir = temp_cache_dir();
         let cache = BlockCache::new(&dir, 1, 2, 512 * 1024);
-        let err = cache.ensure(3, async { Err(anyhow::anyhow!("boom")) }).await;
+        let err = cache
+            .ensure(3, async { Err(anyhow::anyhow!("boom")) })
+            .await;
         assert!(err.is_err());
-        let err2 = cache.ensure(3, async { panic!("waiter must not retry") }).await;
+        let err2 = cache
+            .ensure(3, async { panic!("waiter must not retry") })
+            .await;
         assert!(err2.is_err());
         assert!(err2.unwrap_err().to_string().contains("boom"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -577,8 +584,14 @@ mod tests {
         // Budget after removing `stale` is 5000 bytes, cap 2500: both fresh files go too.
         assert!(!fresh_a.exists());
         assert!(!fresh_b.exists());
-        assert!(!dir.join("2_2.bin.meta").exists(), "manifest must go with its video");
-        assert!(!dir.join("4_4.bin.tmp").exists(), "stray tmp file must be removed");
+        assert!(
+            !dir.join("2_2.bin.meta").exists(),
+            "manifest must go with its video"
+        );
+        assert!(
+            !dir.join("4_4.bin.tmp").exists(),
+            "stray tmp file must be removed"
+        );
         assert_eq!(removed, 6000);
         let _ = std::fs::remove_dir_all(&dir);
     }

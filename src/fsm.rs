@@ -195,24 +195,24 @@ impl PlayerFsm {
                 }
             }
             PlayerEvent::Next => {
-                if let Some(i) = self.current_index {
-                    if i + 1 < self.playlist.len() {
-                        let path = self.playlist[i + 1].clone();
-                        self.current_index = Some(i + 1);
-                        sync_persistent_playlist(self);
-                        return load_media(self, path);
-                    }
+                if let Some(i) = self.current_index
+                    && i + 1 < self.playlist.len()
+                {
+                    let path = self.playlist[i + 1].clone();
+                    self.current_index = Some(i + 1);
+                    sync_persistent_playlist(self);
+                    return load_media(self, path);
                 }
                 Handled
             }
             PlayerEvent::Previous => {
-                if let Some(i) = self.current_index {
-                    if i > 0 {
-                        let path = self.playlist[i - 1].clone();
-                        self.current_index = Some(i - 1);
-                        sync_persistent_playlist(self);
-                        return load_media(self, path);
-                    }
+                if let Some(i) = self.current_index
+                    && i > 0
+                {
+                    let path = self.playlist[i - 1].clone();
+                    self.current_index = Some(i - 1);
+                    sync_persistent_playlist(self);
+                    return load_media(self, path);
                 }
                 Handled
             }

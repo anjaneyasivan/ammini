@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use eframe::egui;
+use egui_material_icons::MaterialIcon;
 
 /// Modern monochrome Noto Emoji (variable weight), covering emojis through Unicode 15+
 /// including ZWJ sequences, skin tones and flags.
@@ -32,23 +33,63 @@ const DEJA_VU_SANS: &[u8] = include_bytes!("../assets/fonts/DejaVuSans.ttf");
 /// definitions) is the safety net for that.
 const SYSTEM_FALLBACKS: &[(&str, &str, u32)] = &[
     ("Arabic", "/System/Library/Fonts/GeezaPro.ttc", 0),
-    ("Devanagari", "/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc", 0),
-    ("Bengali", "/System/Library/Fonts/Supplemental/Bengali Sangam MN.ttc", 0),
-    ("Gurmukhi", "/System/Library/Fonts/Supplemental/Gurmukhi Sangam MN.ttc", 0),
-    ("Gujarati", "/System/Library/Fonts/Supplemental/Gujarati Sangam MN.ttc", 0),
-    ("Tamil", "/System/Library/Fonts/Supplemental/Tamil Sangam MN.ttc", 0),
-    ("Telugu", "/System/Library/Fonts/Supplemental/Telugu Sangam MN.ttc", 0),
-    ("Malayalam", "/System/Library/Fonts/Supplemental/Malayalam Sangam MN.ttc", 0),
+    (
+        "Devanagari",
+        "/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc",
+        0,
+    ),
+    (
+        "Bengali",
+        "/System/Library/Fonts/Supplemental/Bengali Sangam MN.ttc",
+        0,
+    ),
+    (
+        "Gurmukhi",
+        "/System/Library/Fonts/Supplemental/Gurmukhi Sangam MN.ttc",
+        0,
+    ),
+    (
+        "Gujarati",
+        "/System/Library/Fonts/Supplemental/Gujarati Sangam MN.ttc",
+        0,
+    ),
+    (
+        "Tamil",
+        "/System/Library/Fonts/Supplemental/Tamil Sangam MN.ttc",
+        0,
+    ),
+    (
+        "Telugu",
+        "/System/Library/Fonts/Supplemental/Telugu Sangam MN.ttc",
+        0,
+    ),
+    (
+        "Malayalam",
+        "/System/Library/Fonts/Supplemental/Malayalam Sangam MN.ttc",
+        0,
+    ),
     ("Kannada", "/System/Library/Fonts/NotoSansKannada.ttc", 0),
     ("Oriya", "/System/Library/Fonts/NotoSansOriya.ttc", 0),
     ("Myanmar", "/System/Library/Fonts/NotoSansMyanmar.ttc", 0),
     ("Armenian", "/System/Library/Fonts/NotoSansArmenian.ttc", 0),
-    ("Khmer", "/System/Library/Fonts/Supplemental/Khmer Sangam MN.ttf", 0),
+    (
+        "Khmer",
+        "/System/Library/Fonts/Supplemental/Khmer Sangam MN.ttf",
+        0,
+    ),
     ("Lao", "/System/Library/Fonts/Supplemental/Lao MN.ttc", 0),
     ("Thai", "/System/Library/Fonts/Supplemental/Thonburi.ttc", 0),
     // Linux CJK (Noto Sans CJK). Paths vary by distro; only one will exist.
-    ("NotoCJK", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),
-    ("NotoCJKAlt", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", 0),
+    (
+        "NotoCJK",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        0,
+    ),
+    (
+        "NotoCJKAlt",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        0,
+    ),
 ];
 
 /// Build the app's font stack on top of the egui defaults. Our emoji font and any system
@@ -66,7 +107,10 @@ pub fn font_definitions() -> egui::FontDefinitions {
             }),
         ),
     );
-    defs.font_data.insert("DejaVuSans".to_owned(), Arc::new(egui::FontData::from_static(DEJA_VU_SANS)));
+    defs.font_data.insert(
+        "DejaVuSans".to_owned(),
+        Arc::new(egui::FontData::from_static(DEJA_VU_SANS)),
+    );
 
     // DejaVu Sans sits right after the emoji font: it picks up symbols/arrows/dingbats
     // the emoji font doesn't cover, before egui's (outdated) builtins or script fallbacks.
@@ -98,7 +142,19 @@ pub fn font_definitions() -> egui::FontDefinitions {
 }
 
 /// Install the custom font stack on the egui context. Call once at startup.
+/// The material-icons font is registered afterwards via `egui_material_icons::initialize`
+/// (see `MinMpvApp::new`), which must run AFTER this function: `install` uses
+/// `set_fonts` (replaces all fonts), `initialize` uses `add_font` (merges).
 pub fn install(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());
     tracing::info!("fonts: custom font stack installed");
+}
+
+/// Prefix a Material icon glyph to a button label, e.g. `icon_label(ICON_PLAY, "Play")`.
+/// The icon codepoint renders through the `material-icons` family that
+/// `egui_material_icons::initialize` registers into the Proportional fallback chain, so a
+/// plain string mixing glyph and text renders both at the button's text size.
+pub fn icon_label(icon: MaterialIcon, text: &str) -> String {
+    let glyph: String = icon.into();
+    format!("{glyph} {text}")
 }

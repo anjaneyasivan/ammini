@@ -71,10 +71,8 @@ fn dummy_document() -> Document {
 async fn start_test_server(total_size: u64, source: FakeSource) -> (u16, PathBuf) {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let cache_dir = std::env::temp_dir().join(format!(
-        "min-mpv-proxy-test-{}-{n}",
-        std::process::id()
-    ));
+    let cache_dir =
+        std::env::temp_dir().join(format!("min-mpv-proxy-test-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&cache_dir);
 
     let mut registry = HashMap::new();
@@ -94,7 +92,9 @@ async fn start_test_server(total_size: u64, source: FakeSource) -> (u16, PathBuf
         cache_dir: cache_dir.clone(),
         video_cache: Arc::new(Mutex::new(HashMap::new())),
     };
-    let port = start_server(state).await.expect("proxy server failed to start");
+    let port = start_server(state)
+        .await
+        .expect("proxy server failed to start");
     (port, cache_dir)
 }
 
@@ -113,7 +113,14 @@ async fn get_range(client: &reqwest::Client, url: &str, range: Option<&str>) -> 
 #[tokio::test]
 async fn full_request_serves_every_byte() {
     let total = 2 * BLOCK_SIZE + 123; // spans three blocks, last one partial
-    let (port, dir) = start_test_server(total, FakeSource { total_size: total, ..Default::default() }).await;
+    let (port, dir) = start_test_server(
+        total,
+        FakeSource {
+            total_size: total,
+            ..Default::default()
+        },
+    )
+    .await;
     let res = get_range(&reqwest::Client::new(), &proxy_url(port), None).await;
     assert_eq!(res.status(), 200);
     assert_eq!(res.headers()["accept-ranges"], "bytes");
@@ -127,7 +134,14 @@ async fn full_request_serves_every_byte() {
 #[tokio::test]
 async fn range_request_returns_the_requested_window() {
     let total = 3 * BLOCK_SIZE;
-    let (port, dir) = start_test_server(total, FakeSource { total_size: total, ..Default::default() }).await;
+    let (port, dir) = start_test_server(
+        total,
+        FakeSource {
+            total_size: total,
+            ..Default::default()
+        },
+    )
+    .await;
     let res = get_range(
         &reqwest::Client::new(),
         &proxy_url(port),
@@ -149,8 +163,20 @@ async fn range_request_returns_the_requested_window() {
 #[tokio::test]
 async fn suffix_range_returns_the_tail() {
     let total = 3 * BLOCK_SIZE;
-    let (port, dir) = start_test_server(total, FakeSource { total_size: total, ..Default::default() }).await;
-    let res = get_range(&reqwest::Client::new(), &proxy_url(port), Some("bytes=-500")).await;
+    let (port, dir) = start_test_server(
+        total,
+        FakeSource {
+            total_size: total,
+            ..Default::default()
+        },
+    )
+    .await;
+    let res = get_range(
+        &reqwest::Client::new(),
+        &proxy_url(port),
+        Some("bytes=-500"),
+    )
+    .await;
     let body = res.bytes().await.unwrap();
     assert_eq!(body.len(), 500);
     assert_eq!(body[0], byte_at(total - 500));
@@ -161,7 +187,10 @@ async fn suffix_range_returns_the_tail() {
 #[tokio::test]
 async fn cached_blocks_are_not_downloaded_twice() {
     let total = 3 * BLOCK_SIZE;
-    let source = FakeSource { total_size: total, ..Default::default() };
+    let source = FakeSource {
+        total_size: total,
+        ..Default::default()
+    };
     let downloads = source.downloads.clone();
     let (port, dir) = start_test_server(total, source).await;
     let client = reqwest::Client::new();
@@ -242,9 +271,16 @@ async fn failed_block_aborts_the_body() {
 #[tokio::test]
 async fn head_request_has_no_body() {
     let total = BLOCK_SIZE;
-    let (port, dir) = start_test_server(total, FakeSource { total_size: total, ..Default::default() }).await;
+    let (port, dir) = start_test_server(
+        total,
+        FakeSource {
+            total_size: total,
+            ..Default::default()
+        },
+    )
+    .await;
     let res = reqwest::Client::new()
-        .head(&proxy_url(port))
+        .head(proxy_url(port))
         .send()
         .await
         .unwrap();

@@ -1,6 +1,8 @@
 use eframe::egui;
+use egui_material_icons::icons::*;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::fonts::icon_label;
 use crate::telegram::BgCommand;
 use crate::telegram::state_machine::{TelegramData, TelegramEvent, TelegramFsm, TelegramState};
 use statig::blocking::StateMachine;
@@ -62,17 +64,17 @@ impl TelegramPanel {
         let is_error = matches!(fsm.state(), TelegramState::Error {});
         if is_error {
             ui.label("An error occurred.");
-            if ui.button("Retry").clicked() {
+            if ui.button(icon_label(ICON_REFRESH, "Retry")).clicked() {
                 fsm.handle(&TelegramEvent::ResetAuth);
             }
             ui.separator();
         }
 
-        if let Some(err) = &fsm.data.error {
-            if !err.trim().is_empty() {
-                ui.colored_label(egui::Color32::RED, err);
-                ui.separator();
-            }
+        if let Some(err) = &fsm.data.error
+            && !err.trim().is_empty()
+        {
+            ui.colored_label(egui::Color32::RED, err);
+            ui.separator();
         }
 
         ui.label("Sign in with your Telegram account");
@@ -84,7 +86,7 @@ impl TelegramPanel {
             });
             data.phone.trim().to_string()
         };
-        if ui.button("Send Code").clicked() && !phone.is_empty() {
+        if ui.button(icon_label(ICON_SEND, "Send Code")).clicked() && !phone.is_empty() {
             fsm.handle(&TelegramEvent::PhoneSubmitted(phone.clone()));
             Self::send(bg, BgCommand::SubmitPhone(phone));
         }
@@ -97,10 +99,10 @@ impl TelegramPanel {
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
         ui.label("Enter the code sent to your Telegram app");
-        if let Some(err) = &fsm.data.error {
-            if !err.trim().is_empty() {
-                ui.colored_label(egui::Color32::RED, err);
-            }
+        if let Some(err) = &fsm.data.error
+            && !err.trim().is_empty()
+        {
+            ui.colored_label(egui::Color32::RED, err);
         }
         let code = {
             let data = Self::data_mut(fsm);
@@ -110,11 +112,14 @@ impl TelegramPanel {
             });
             data.code.trim().to_string()
         };
-        if ui.button("Verify").clicked() && !code.is_empty() {
+        if ui.button(icon_label(ICON_CHECK, "Verify")).clicked() && !code.is_empty() {
             fsm.handle(&TelegramEvent::CodeSubmitted(code.clone()));
             Self::send(bg, BgCommand::SubmitCode(code));
         }
-        if ui.button("← Change phone number").clicked() {
+        if ui
+            .button(icon_label(ICON_ARROW_BACK, "Change phone number"))
+            .clicked()
+        {
             Self::data_mut(fsm).code.clear();
             fsm.handle(&TelegramEvent::NeedsAuth);
         }
@@ -127,15 +132,15 @@ impl TelegramPanel {
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
         ui.label("Two-factor authentication");
-        if let Some(hint) = &fsm.data.password_hint {
-            if !hint.is_empty() {
-                ui.label(format!("Hint: {hint}"));
-            }
+        if let Some(hint) = &fsm.data.password_hint
+            && !hint.is_empty()
+        {
+            ui.label(format!("Hint: {hint}"));
         }
-        if let Some(err) = &fsm.data.error {
-            if !err.trim().is_empty() {
-                ui.colored_label(egui::Color32::RED, err);
-            }
+        if let Some(err) = &fsm.data.error
+            && !err.trim().is_empty()
+        {
+            ui.colored_label(egui::Color32::RED, err);
         }
         let (password, display_pw) = {
             let data = Self::data_mut(fsm);
@@ -147,11 +152,14 @@ impl TelegramPanel {
             let display = data.password.clone();
             (pw, display)
         };
-        if ui.button("Sign In").clicked() && !password.is_empty() {
+        if ui.button(icon_label(ICON_LOGIN, "Sign In")).clicked() && !password.is_empty() {
             fsm.handle(&TelegramEvent::PasswordSubmitted(display_pw));
             Self::send(bg, BgCommand::SubmitPassword(password));
         }
-        if ui.button("← Change phone number").clicked() {
+        if ui
+            .button(icon_label(ICON_ARROW_BACK, "Change phone number"))
+            .clicked()
+        {
             Self::data_mut(fsm).password.clear();
             fsm.handle(&TelegramEvent::NeedsAuth);
         }
@@ -183,7 +191,11 @@ impl TelegramPanel {
                     }
                     ui.separator();
                 }
-                if data.has_more_dialogs && ui.button("Load more chats").clicked() {
+                if data.has_more_dialogs
+                    && ui
+                        .button(icon_label(ICON_EXPAND_MORE, "Load more chats"))
+                        .clicked()
+                {
                     has_more_clicked = true;
                 }
             });
@@ -199,7 +211,7 @@ impl TelegramPanel {
         }
 
         ui.separator();
-        if ui.button("Sign out").clicked() {
+        if ui.button(icon_label(ICON_LOGOUT, "Sign out")).clicked() {
             Self::send(bg, BgCommand::SignOut);
         }
     }
@@ -211,7 +223,7 @@ impl TelegramPanel {
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
         ui.horizontal(|ui| {
-            if ui.button("← Back").clicked() {
+            if ui.button(icon_label(ICON_ARROW_BACK, "Back")).clicked() {
                 fsm.handle(&TelegramEvent::BackToChatList);
                 Self::send(bg, BgCommand::BackToChatList);
             }
@@ -223,11 +235,11 @@ impl TelegramPanel {
         });
         ui.separator();
 
-        if let Some(err) = &fsm.data.error {
-            if !err.trim().is_empty() {
-                ui.colored_label(egui::Color32::RED, err);
-                ui.separator();
-            }
+        if let Some(err) = &fsm.data.error
+            && !err.trim().is_empty()
+        {
+            ui.colored_label(egui::Color32::RED, err);
+            ui.separator();
         }
 
         let mut clicked_msg_id: Option<i32> = None;
@@ -235,7 +247,10 @@ impl TelegramPanel {
         egui::ScrollArea::vertical().show(ui, |ui| {
             // Older messages load above the current ones, so the button lives at the top.
             if fsm.data.has_more_messages {
-                if ui.button("Load older messages").clicked() {
+                if ui
+                    .button(icon_label(ICON_EXPAND_MORE, "Load older messages"))
+                    .clicked()
+                {
                     load_more_clicked = true;
                 }
                 ui.separator();
@@ -260,7 +275,7 @@ impl TelegramPanel {
                             ui.spinner();
                             ui.label("Loading video…");
                         });
-                    } else if ui.button("▶ Play").clicked() {
+                    } else if ui.button(icon_label(ICON_PLAY_ARROW, "Play")).clicked() {
                         clicked_msg_id = Some(msg.id);
                     }
                 }

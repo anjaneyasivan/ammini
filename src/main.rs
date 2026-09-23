@@ -85,10 +85,9 @@ impl MinMpvApp {
         egui_material_icons::initialize(&cc.egui_ctx);
 
         let player = PlayerState::new(cc).map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("failed to initialize player: {e}"),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(format!(
+                "failed to initialize player: {e}"
+            ))) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         let persistent: PersistentState = cc
@@ -110,10 +109,10 @@ impl MinMpvApp {
             resume_pending: None,
             last_resume_write: None,
         };
-        if let Some(volume) = player_fsm.persistent.volume {
-            if let Err(e) = player_fsm.player.set_volume(volume) {
-                tracing::warn!("failed to restore volume {volume}: {e}");
-            }
+        if let Some(volume) = player_fsm.persistent.volume
+            && let Err(e) = player_fsm.player.set_volume(volume)
+        {
+            tracing::warn!("failed to restore volume {volume}: {e}");
         }
         let fsm = player_fsm.state_machine();
 
@@ -219,29 +218,31 @@ impl MinMpvApp {
             .video_focus_id
             .is_some_and(|id| ctx.memory(|m| m.has_focus(id)));
         if !video_focused {
-            if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
-                if let Err(e) = self.player_mut().toggle_pause() {
-                    tracing::warn!("failed to toggle pause: {e}");
-                }
+            if ctx.input(|i| i.key_pressed(egui::Key::Space))
+                && let Err(e) = self.player_mut().toggle_pause()
+            {
+                tracing::warn!("failed to toggle pause: {e}");
             }
-            if ctx.input(|i| i.key_pressed(egui::Key::M)) {
-                if let Err(e) = self.player_mut().toggle_mute() {
-                    tracing::warn!("failed to toggle mute: {e}");
-                }
+            if ctx.input(|i| i.key_pressed(egui::Key::M))
+                && let Err(e) = self.player_mut().toggle_mute()
+            {
+                tracing::warn!("failed to toggle mute: {e}");
             }
-            let volume_delta = if ctx.input(|i| {
-                i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals)
-            }) {
+            let volume_delta = if ctx
+                .input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
+            {
                 Some(5.0)
             } else if ctx.input(|i| i.key_pressed(egui::Key::Minus)) {
                 Some(-5.0)
             } else {
                 None
             };
-            if let Some(delta) = volume_delta {
-                if let Ok(current) = self.player_mut().volume() {
-                    let _ = self.player_mut().set_volume((current + delta).clamp(0.0, 100.0));
-                }
+            if let Some(delta) = volume_delta
+                && let Ok(current) = self.player_mut().volume()
+            {
+                let _ = self
+                    .player_mut()
+                    .set_volume((current + delta).clamp(0.0, 100.0));
             }
             if ctx.input(|i| i.key_pressed(egui::Key::F)) {
                 let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
@@ -250,10 +251,9 @@ impl MinMpvApp {
         }
 
         if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift)
+            && let Some(e) = self.open_file_dialog()
         {
-            if let Some(e) = self.open_file_dialog() {
-                events.push(e);
-            }
+            events.push(e);
         }
         if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && i.modifiers.shift) {
             events.extend(self.open_folder_dialog());
@@ -313,12 +313,15 @@ impl MinMpvApp {
     fn top_bar(&mut self, ui: &mut egui::Ui, events: &mut Vec<PlayerEvent>) {
         let mut clear_resume = false;
         ui.horizontal(|ui| {
-            if ui.button(icon_label(ICON_FILE_OPEN, "Open File")).clicked() {
-                if let Some(e) = self.open_file_dialog() {
-                    events.push(e);
-                }
+            if ui.button(icon_label(ICON_FILE_OPEN, "Open File")).clicked()
+                && let Some(e) = self.open_file_dialog()
+            {
+                events.push(e);
             }
-            if ui.button(icon_label(ICON_FOLDER_OPEN, "Open Folder")).clicked() {
+            if ui
+                .button(icon_label(ICON_FOLDER_OPEN, "Open Folder"))
+                .clicked()
+            {
                 events.extend(self.open_folder_dialog());
             }
             if ui.button(icon_label(ICON_LINK, "Open URL")).clicked() {
@@ -332,7 +335,10 @@ impl MinMpvApp {
                 events.push(PlayerEvent::Next);
             }
             ui.separator();
-            if ui.button(icon_label(ICON_PLAYLIST_PLAY, "Playlist")).clicked() {
+            if ui
+                .button(icon_label(ICON_PLAYLIST_PLAY, "Playlist"))
+                .clicked()
+            {
                 events.push(PlayerEvent::TogglePlaylist);
             }
             if ui.button(icon_label(ICON_SEND, "Telegram")).clicked() {
@@ -402,7 +408,9 @@ impl App for MinMpvApp {
                     self.telegram_fsm.handle(&TelegramEvent::VideoError(e));
                 }
                 other => {
-                    if let Some(event) = min_mpv::telegram::state_machine::ui_message_to_event(&other) {
+                    if let Some(event) =
+                        min_mpv::telegram::state_machine::ui_message_to_event(&other)
+                    {
                         self.telegram_fsm.handle(&event);
                     }
                 }
@@ -444,8 +452,10 @@ impl App for MinMpvApp {
         }
 
         egui::CentralPanel::default().show(ui, |ui| {
-            let player_response =
-                ui.add(SharkPlayer::new_with_icons(self.player_mut(), PlayerControlIcons));
+            let player_response = ui.add(SharkPlayer::new_with_icons(
+                self.player_mut(),
+                PlayerControlIcons,
+            ));
             self.video_focus_id = Some(player_response.id);
         });
     }
@@ -469,7 +479,10 @@ impl App for MinMpvApp {
 fn truncate_path(path: &str) -> String {
     let chars: Vec<char> = path.chars().collect();
     if chars.len() > 60 {
-        format!("...{}", chars[chars.len() - 57..].iter().collect::<String>())
+        format!(
+            "...{}",
+            chars[chars.len() - 57..].iter().collect::<String>()
+        )
     } else {
         path.to_string()
     }

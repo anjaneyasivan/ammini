@@ -15,13 +15,15 @@ pub use state_machine::{TelegramEvent, TelegramFsm, TelegramState};
 
 use client::TelegramClient;
 use config::TelegramConfig;
-use proxy::{start_server, ProxyState};
+use proxy::{ProxyState, start_server};
 
 /// Messages sent from the background thread to the UI.
 #[derive(Debug)]
 pub enum UiMessage {
     /// The combined proxy server is ready. Contains the local port.
-    ProxyReady { port: u16 },
+    ProxyReady {
+        port: u16,
+    },
     NeedsAuth,
     AuthSuccess,
     CodeRequested,
@@ -118,7 +120,7 @@ async fn run_telegram(
     // Cache directory for the disk block cache. Per-video files are created lazily on
     // first request and evicted with `video_registry` on chat switch/sign-out.
     let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(|| std::env::temp_dir())
+        .unwrap_or_else(std::env::temp_dir)
         .join("min-mpv")
         .join("telegram_cache");
 
@@ -183,19 +185,16 @@ async fn run_telegram(
 
     while let Some(command) = bg_rx.recv().await {
         match command {
-            BgCommand::SubmitPhone(phone) => {
-                match client.request_login_code(&phone).await {
-                    Ok(token) => {
-                        login_token = Some(token);
-                        let _ = ui_tx.send(UiMessage::CodeRequested);
-                    }
-                    Err(e) => {
-                        let _ = ui_tx.send(UiMessage::AuthError(format!(
-                            "Failed to request code: {e}"
-                        )));
-                    }
+            BgCommand::SubmitPhone(phone) => match client.request_login_code(&phone).await {
+                Ok(token) => {
+                    login_token = Some(token);
+                    let _ = ui_tx.send(UiMessage::CodeRequested);
                 }
-            }
+                Err(e) => {
+                    let _ =
+                        ui_tx.send(UiMessage::AuthError(format!("Failed to request code: {e}")));
+                }
+            },
             BgCommand::SubmitCode(code) => {
                 let token = match login_token.as_ref() {
                     Some(t) => t,
@@ -244,9 +243,8 @@ async fn run_telegram(
                         ));
                     }
                     Err(client::SignInError::InvalidPassword(_)) => {
-                        let _ = ui_tx.send(UiMessage::AuthError(
-                            "Invalid 2FA password.".to_string(),
-                        ));
+                        let _ =
+                            ui_tx.send(UiMessage::AuthError("Invalid 2FA password.".to_string()));
                     }
                     Err(client::SignInError::Other(e)) => {
                         let _ = ui_tx.send(UiMessage::AuthError(format!("Sign in error: {e}")));
@@ -257,18 +255,13 @@ async fn run_telegram(
                 let pw_token = match password_token.take() {
                     Some(t) => t,
                     None => {
-                        let _ = ui_tx.send(UiMessage::AuthError(
-                            "No 2FA session.".to_string(),
-                        ));
+                        let _ = ui_tx.send(UiMessage::AuthError("No 2FA session.".to_string()));
                         continue;
                     }
                 };
                 match client.check_password(pw_token, password).await {
                     Ok(user) => {
-                        tracing::info!(
-                            "telegram: 2FA ok (user {})",
-                            user.id().bare_id_unchecked()
-                        );
+                        tracing::info!("telegram: 2FA ok (user {})", user.id().bare_id_unchecked());
                         let _ = ui_tx.send(UiMessage::AuthSuccess);
                         let mut iter = client.iter_dialogs();
                         match client::next_dialogs_page(&mut iter, client::DIALOG_PAGE_SIZE).await {
@@ -287,18 +280,15 @@ async fn run_telegram(
                     }
                     Err(client::SignInError::InvalidPassword(pw_token)) => {
                         password_token = Some(pw_token);
-                        let _ = ui_tx.send(UiMessage::AuthError(
-                            "Invalid 2FA password.".to_string(),
-                        ));
+                        let _ =
+                            ui_tx.send(UiMessage::AuthError("Invalid 2FA password.".to_string()));
                     }
                     Err(client::SignInError::Other(e)) => {
-                        let _ =
-                            ui_tx.send(UiMessage::AuthError(format!("2FA error: {e}")));
+                        let _ = ui_tx.send(UiMessage::AuthError(format!("2FA error: {e}")));
                     }
                     _ => {
-                        let _ = ui_tx.send(UiMessage::AuthError(
-                            "Unexpected 2FA error.".to_string(),
-                        ));
+                        let _ =
+                            ui_tx.send(UiMessage::AuthError("Unexpected 2FA error.".to_string()));
                     }
                 }
             }
@@ -341,12 +331,8 @@ async fn run_telegram(
                 video_cache.lock().await.clear();
 
                 let mut iter = client.iter_messages(peer_ref);
-                match client::next_messages_page(
-                    &mut iter,
-                    client::MESSAGE_PAGE_SIZE,
-                    chat_id,
-                )
-                .await
+                match client::next_messages_page(&mut iter, client::MESSAGE_PAGE_SIZE, chat_id)
+                    .await
                 {
                     Ok((messages, videos, has_more)) => {
                         messages_iter = Some(iter);
@@ -373,8 +359,7 @@ async fn run_telegram(
                     None => continue,
                 };
                 if let Some(iter) = messages_iter.as_mut() {
-                    match client::next_messages_page(iter, client::MESSAGE_PAGE_SIZE, chat_id)
-                        .await
+                    match client::next_messages_page(iter, client::MESSAGE_PAGE_SIZE, chat_id).await
                     {
                         Ok((messages, videos, has_more)) => {
                             {
@@ -418,9 +403,7 @@ async fn run_telegram(
 
                 let size = video.size as u64;
                 if size == 0 {
-                    let _ = ui_tx.send(UiMessage::VideoError(
-                        "Unknown video size".to_string(),
-                    ));
+                    let _ = ui_tx.send(UiMessage::VideoError("Unknown video size".to_string()));
                     continue;
                 }
 

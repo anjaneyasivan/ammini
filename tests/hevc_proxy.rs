@@ -12,10 +12,10 @@ use tokio::sync::Mutex;
 
 use min_mpv::telegram::cache::BlockCache;
 use min_mpv::telegram::client::{
-    find_first_hevc_video, is_hevc_video, GrammersVideoSource, TelegramClient,
+    GrammersVideoSource, TelegramClient, find_first_hevc_video, is_hevc_video,
 };
 use min_mpv::telegram::config::TelegramConfig;
-use min_mpv::telegram::proxy::{start_server, ProxyState};
+use min_mpv::telegram::proxy::{ProxyState, start_server};
 use min_mpv::telegram::session;
 
 #[tokio::test]
@@ -73,7 +73,10 @@ async fn find_first_hevc_video_and_test_proxy_range() {
     };
 
     let name = video.document.name().unwrap_or("(no name)");
-    println!("Found HEVC video: msg_id={} size={} name={}", video.msg_id, video.size, name);
+    println!(
+        "Found HEVC video: msg_id={} size={} name={}",
+        video.msg_id, video.size, name
+    );
     assert!(is_hevc_video(&video));
 
     let mut registry = HashMap::new();
@@ -92,7 +95,9 @@ async fn find_first_hevc_video_and_test_proxy_range() {
         video_cache: video_cache.clone(),
     };
 
-    let port = start_server(proxy_state).await.expect("proxy server failed to start");
+    let port = start_server(proxy_state)
+        .await
+        .expect("proxy server failed to start");
     let base = format!("http://127.0.0.1:{}/telegram/{}", port, video.msg_id);
     let http = reqwest::Client::new();
 
@@ -142,7 +147,12 @@ async fn find_first_hevc_video_and_test_proxy_range() {
         .await
         .expect("tail range request failed");
     assert_eq!(res.status(), reqwest::StatusCode::PARTIAL_CONTENT);
-    let content_range = res.headers().get("content-range").unwrap().to_str().unwrap();
+    let content_range = res
+        .headers()
+        .get("content-range")
+        .unwrap()
+        .to_str()
+        .unwrap();
     let expected_range = format!("bytes {}-{}/{}", tail_start, video.size - 1, video.size);
     assert_eq!(content_range, expected_range);
     let body = res.bytes().await.unwrap();

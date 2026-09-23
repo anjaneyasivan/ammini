@@ -1,7 +1,7 @@
 // Re-export grammers types used in our public API
+pub use grammers_client::SignInError;
 pub use grammers_client::client::LoginToken;
 pub use grammers_client::client::{DialogIter, MessageIter};
-pub use grammers_client::SignInError;
 pub use grammers_client::media::Document;
 pub use grammers_session::types::PeerRef;
 
@@ -64,6 +64,9 @@ impl TelegramClient {
         Ok(token)
     }
 
+    // grammers' SignInError is a large enum; boxing it would ripple through the state
+    // machine for no gain on this infrequent path.
+    #[allow(clippy::result_large_err)]
     pub async fn sign_in(&self, token: &LoginToken, code: &str) -> Result<User, SignInError> {
         tracing::debug!("tg: signing in with code");
         let result = self.client.sign_in(token, code).await;
@@ -74,6 +77,7 @@ impl TelegramClient {
         result
     }
 
+    #[allow(clippy::result_large_err)]
     pub async fn check_password(
         &self,
         token: grammers_client::client::PasswordToken,
@@ -82,7 +86,10 @@ impl TelegramClient {
         tracing::debug!("tg: submitting 2FA password");
         let result = self.client.check_password(token, password).await;
         match &result {
-            Ok(user) => tracing::debug!("tg: check_password ok (user={})", user.id().bare_id_unchecked()),
+            Ok(user) => tracing::debug!(
+                "tg: check_password ok (user={})",
+                user.id().bare_id_unchecked()
+            ),
             Err(e) => tracing::debug!("tg: check_password failed: {:?}", e),
         }
         result
@@ -164,7 +171,9 @@ pub async fn download_block(
         Ok(None) => Err(anyhow::anyhow!(
             "block {block}: telegram download returned no data"
         )),
-        Err(e) => Err(anyhow::anyhow!("block {block}: telegram download failed: {e}")),
+        Err(e) => Err(anyhow::anyhow!(
+            "block {block}: telegram download failed: {e}"
+        )),
     }
 }
 
@@ -192,7 +201,11 @@ pub async fn next_dialogs_page(
         has_more = false;
     }
 
-    tracing::debug!("tg: fetched {} dialogs (has_more={})", dialogs.len(), has_more);
+    tracing::debug!(
+        "tg: fetched {} dialogs (has_more={})",
+        dialogs.len(),
+        has_more
+    );
     Ok((dialogs, has_more))
 }
 
@@ -300,10 +313,7 @@ fn extract_video(
     // plain attachments (e.g. `.mkv`) may not, so also accept video file names / MIME types.
     let is_video = doc.duration().is_some()
         || doc.resolution().is_some()
-        || doc
-            .name()
-            .map(|n| is_video_filename(n))
-            .unwrap_or(false)
+        || doc.name().map(is_video_filename).unwrap_or(false)
         || doc
             .mime_type()
             .map(|m| m.to_lowercase().starts_with("video/"))
@@ -351,9 +361,7 @@ pub fn is_hevc_video(video: &VideoDownloadInfo) -> bool {
 
 /// Search all dialogs for the first message containing an HEVC video.
 /// Returns `Ok(None)` if authorized but no HEVC video was found.
-pub async fn find_first_hevc_video(
-    client: &TelegramClient,
-) -> Result<Option<VideoDownloadInfo>> {
+pub async fn find_first_hevc_video(client: &TelegramClient) -> Result<Option<VideoDownloadInfo>> {
     let mut dialogs_iter = client.iter_dialogs();
     loop {
         let (dialogs, has_more_dialogs) =
@@ -434,8 +442,17 @@ mod tests {
 
     #[test]
     fn rejects_non_video_filenames() {
-        for name in ["doc.pdf", "archive.zip", "song.mp3", "no_extension", "video.mkv.bak"] {
-            assert!(!is_video_filename(name), "expected {name} not to be a video");
+        for name in [
+            "doc.pdf",
+            "archive.zip",
+            "song.mp3",
+            "no_extension",
+            "video.mkv.bak",
+        ] {
+            assert!(
+                !is_video_filename(name),
+                "expected {name} not to be a video"
+            );
         }
     }
 }

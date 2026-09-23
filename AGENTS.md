@@ -19,6 +19,7 @@
   - `/telegram/{msg_id}` — streams Telegram video bytes with byte-range support through a **disk-backed block cache** (`src/telegram/cache.rs`). Videos are cached as 512 KiB blocks in per-video files under the OS cache dir (`~/Library/Caches/min-mpv/telegram_cache/{chat_id}_{msg_id}.bin`); RAM holds only coverage metadata. Concurrent range requests deduplicate downloads via an in-flight set + a `watch` version counter (waiter coordination — don't switch to a raw `Notify`, it misses completions). Blocks are written whole and chunk-aligned, so no partial-range bookkeeping.
 - The bg thread keeps `video_registry: HashMap<i32, VideoDownloadInfo>` (msg_id → document metadata) and `video_cache: HashMap<i32, BlockCache>`; both are cleared on chat switch/sign-out.
 - Custom font stack in `src/fonts.rs`: bundled NotoEmoji (Unicode 15+, covers ZWJ sequences, skin tones, flags) + bundled DejaVu Sans (symbols/dingbats/arrows), plus best-effort system script fallbacks (CJK deliberately skipped on macOS to keep startup/memory light).
+- Buttons use Material Design icons from `egui_material_icons` 0.7 (Material Symbols font with a `material-icons` family). Keep plain text in sync: labels are built via `fonts::icon_label(ICON_X, "Label")` (`src/fonts.rs`). `MinMpvApp::new` calls `egui_material_icons::initialize(&ctx)` AFTER `fonts::install` — install uses `set_fonts` (replaces), initialize uses `add_font` (merges), so that order is required (covered by `tests/emoji_support.rs::material_icon_font_registers_and_covers_icons`). The on-video control bar drawn by egui-sharkplayer gets its glyphs from `PlayerControlIcons` in `main.rs`, a `ControlsIconProvider` impl replacing the crate's default text symbols (`<<`, `>>`, `▶`, `🔊`…) — if you add a control there, give it a matching `ICON_*`.
 
 ## Testing
 - Fast offline suite: `cargo test --lib` (unit tests in `cache.rs`/`client.rs`/`proxy.rs`/`state_machine.rs`).
@@ -29,5 +30,6 @@
 
 ## Gotchas
 - Shortcuts not in the README: `Cmd+U` opens the URL dialog, `Cmd+T` toggles the Telegram panel.
+- `egui_material_icons` is pinned to the app's egui version: 0.7 ↔ egui 0.35 (latest 0.8 requires egui 0.36, and egui crates can't mix versions in one graph). Do not bump eframe/egui without bumping this crate to the matching release.
 - `cargo build` prints a future-incompat warning about `proc-macro-error2` (transitive dep of `statig_macro`/`statig`: `pub use proc_macro` at lib.rs:494, Rust issue #127909). It is harmless and deliberately ignored — the proc-macro-error2 repo is archived, `statig` main still pins 2.0.1, and there is no newer fixed version. Don't try to "fix" it by bumping/patching deps; revisit only if a future Rust promotes E0365 to a hard error.
 - `egui` panics at startup if any registered font fails to parse — only add fonts that are guaranteed to exist (see note in `src/fonts.rs`).

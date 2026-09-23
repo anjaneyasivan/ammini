@@ -83,7 +83,7 @@ impl TelegramData {
         } else {
             // Older pages arrive newest-first; prepend them in reversed order.
             let mut older: Vec<MessageInfo> = messages.iter().rev().cloned().collect();
-            older.extend(self.messages.drain(..));
+            older.append(&mut self.messages);
             self.messages = older;
         }
         self.has_more_messages = has_more;
@@ -367,7 +367,11 @@ mod tests {
         // above the current messages.
         data.update_messages(&[msg(5), msg(4)], true, false);
         let ids: Vec<i32> = data.messages.iter().map(|m| m.id).collect();
-        assert_eq!(ids, vec![4, 5, 1, 2, 3], "older messages prepended, oldest first");
+        assert_eq!(
+            ids,
+            vec![4, 5, 1, 2, 3],
+            "older messages prepended, oldest first"
+        );
     }
 
     #[test]

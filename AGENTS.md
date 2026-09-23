@@ -4,7 +4,7 @@
 
 ## Build & run
 - Rust 1.92+ (edition 2024). libmpv is required (`brew install mpv` on macOS; `build.rs` adds `/opt/homebrew/lib`/`/usr/local/lib` automatically).
-- `.env` (gitignored) is REQUIRED: `cargo run` exits if `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` are missing. There is no `.env.example` (an error message references one, but it does not exist). `dotenvy` loads it at startup.
+- Credentials `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` resolve in this order: the live environment, then a `.env` (loaded by `dotenvy` at startup), then the values **baked into the binary at build time** — `build.rs` parses `.env` and re-exports the keys via `cargo:rustc-env`, and `config.rs` falls back to `option_env!`. So a built binary runs with no `.env` next to it (it still needs libmpv at runtime), while CI (no `.env`) must provide the real environment or the build bakes nothing and startup fails as before. `build.rs` emits `cargo:rerun-if-changed=.env` because `.env` is gitignored and cargo would not otherwise notice edits to it. There is no `.env.example` (an error message references one, but it does not exist).
 - Run with `cargo run`. The `glow` renderer is required (video renders through OpenGL) — do not change it.
 - Logs use `tracing`; default filter is `min_mpv=debug`, override with `RUST_LOG`.
 

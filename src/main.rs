@@ -6,13 +6,15 @@ use ammini::telegram::config::TelegramConfig;
 use ammini::telegram::panel::TelegramPanel;
 use ammini::telegram::state_machine::{TelegramEvent, TelegramFsm};
 use ammini::telegram::{BgCommand, UiMessage, start};
-use ammini::telemetry::TelemetryEvent;
+use ammini::telemetry::{Metric, SeekTracker, TelemetryEvent};
 use eframe::{App, Frame, NativeOptions, egui};
 use egui_material_icons::{MaterialIcon, icons::*};
 use egui_sharkplayer::{PlayerState, SharkPlayer};
 use rfd::FileDialog;
 use statig::blocking::StateMachine;
 use statig::prelude::*;
+use std::rc::Rc;
+use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, info, trace};
 
@@ -99,6 +101,10 @@ struct AmminiApp {
     /// Last seen `track-list/count`, so the lists are only rebuilt when it changes.
     audio_track_count: i64,
     subtitle_track_count: i64,
+    /// Set by the SharkPlayer seek callback (arrow keys / J / L / skip buttons);
+    /// drained once per frame to measure seek latency. Shared with the widget via
+    /// an Arc because the callback outlives the frame that installed it.
+    pending_seek: Arc<std::sync::Mutex<Option<SeekTracker>>>,
 }
 
 impl AmminiApp {
@@ -165,6 +171,7 @@ impl AmminiApp {
             audio_track_count: 0,
             subtitle_tracks: Vec::new(),
             subtitle_track_count: 0,
+            pending_seek: Arc::new(std::sync::Mutex::new(None)),
         };
         app.fsm.init();
         info!("app initialized");
@@ -346,6 +353,23 @@ impl AmminiApp {
         }
     }
 
+    /// Detect an in-flight arrow/skip seek whose playback has resumed past the
+    /// seek target, and emit the seek-latency metric. Runs once per frame.
+    fn poll_seek(&mut self) {
+        let pending = self.pending_seek.clone();
+        let Some(mut tracker) = pending.lock().unwrap().take() else {
+            return;
+        };
+        if tracker.elapsed() > ammini::telemetry::SEEK_PENDING_TIMEOUT {
+            return; // seek never resumed (e.g. paused and never unpaused) — drop
+        }
+        if let Ok(Some(position)) = self.player_mut().time_pos()
+            && let Some(ms) = tracker.poll(position)
+        {
+            ammini::telemetry::emit(TelemetryEvent::Metric(Metric::SeekLatencyMs { ms }));
+        }
+    }
+
     /// Refresh the audio and subtitle track lists from mpv. Only the scalar
     /// `track-list/N/*` sub-properties are read (libmpv2 cannot read the `track-list`
     /// node itself); each list is rebuilt only when its track count changes, so
@@ -506,11 +530,23 @@ impl AmminiApp {
             let chosen_sid =
                 Self::track_switcher_menu(ui, ICON_SUBTITLES, &self.subtitle_tracks, "Subtitles");
             if let Some(id) = chosen_aid {
+                // Label for the telemetry event, captured before the mutable borrow
+                // below flips the selection flags.
+                let label = self
+                    .audio_tracks
+                    .iter()
+                    .find(|t| t.id == id)
+                    .map(|t| t.label.clone())
+                    .unwrap_or_else(|| format!("track {id}"));
                 match self.player_mut().mpv().set_property("aid", id) {
                     Ok(()) => {
                         for track in &mut self.audio_tracks {
                             track.selected = track.id == id;
                         }
+                        ammini::telemetry::emit(TelemetryEvent::AudioTrackChanged {
+                            track_id: id,
+                            label,
+                        });
                     }
                     Err(e) => tracing::warn!("failed to switch audio track to {id}: {e}"),
                 }
@@ -532,6 +568,10 @@ impl AmminiApp {
                 } else {
                     for path in self.fsm.persistent.recent_files.clone() {
                         if ui.button(truncate_path(&path)).clicked() {
+                            ammini::telemetry::emit(TelemetryEvent::RecentItemSelected {
+                                kind: ammini::telemetry::RecentKind::File,
+                                name: path_basename(&path),
+                            });
                             events.push(PlayerEvent::OpenFile(path));
                             ui.close();
                         }
@@ -547,6 +587,10 @@ impl AmminiApp {
                     for entry in self.fsm.persistent.recent_telegram.clone() {
                         let label = format!("{} · {}", entry.chat_name, truncate_path(&entry.name));
                         if ui.button(icon_label(ui, ICON_PLAY_ARROW, &label)).clicked() {
+                            ammini::telemetry::emit(TelemetryEvent::RecentItemSelected {
+                                kind: ammini::telemetry::RecentKind::Telegram,
+                                name: entry.name.clone(),
+                            });
                             if let Some(bg) = &self.bg_tx {
                                 let _ = bg.send(BgCommand::PlayTelegramVideo {
                                     peer: entry.peer,
@@ -695,12 +739,19 @@ impl App for AmminiApp {
             }
             self.fsm.handle(&event);
         }
+        self.poll_seek();
 
         egui::CentralPanel::default().show(ui, |ui| {
-            let player_response = ui.add(SharkPlayer::new_with_icons(
-                self.player_mut(),
-                PlayerControlIcons,
-            ));
+            let pending = self.pending_seek.clone();
+            let player_response = ui.add(
+                SharkPlayer::new_with_icons(self.player_mut(), PlayerControlIcons).seek_callback(
+                    Rc::new(move |_forward, target| {
+                        // Arrow keys / J / L / skip buttons — records the seek so the
+                        // next frames' `poll_seek` can time when playback resumes.
+                        *pending.lock().unwrap() = Some(SeekTracker::new(target, _forward));
+                    }),
+                ),
+            );
             self.video_focus_id = Some(player_response.id);
         });
     }
@@ -731,6 +782,11 @@ fn truncate_path(path: &str) -> String {
     } else {
         path.to_string()
     }
+}
+
+/// Base name of a media path, for telemetry — never full paths.
+fn path_basename(path: &str) -> String {
+    path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned()
 }
 
 fn main() {

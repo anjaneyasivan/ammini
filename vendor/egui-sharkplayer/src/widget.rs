@@ -194,6 +194,10 @@ pub struct SharkPlayer<'a, P: ControlsIconProvider = DefaultControlsIconProvider
     animations:         bool,
     keybinds:           Keybinds,
     on_error:           Rc<dyn Fn(Error)>,
+    // Ammini patch #3: invoked after an arrow/skip-button seek, so the app can
+    // measure seek latency. `true` = forward, second arg = the widget-side
+    // predicted target position after the skip.
+    seek_callback:      Option<Rc<dyn Fn(bool, f64)>>,
 }
 
 impl<'a> SharkPlayer<'a> {
@@ -224,6 +228,7 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
             on_error: Rc::new(|e| {
                 error!("{e}");
             }),
+            seek_callback: None,
         }
     }
 
@@ -280,6 +285,15 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
     #[inline]
     pub fn error_callback(mut self, f: Rc<dyn Fn(Error)>) -> Self {
         self.on_error = f;
+        self
+    }
+
+    /// Install a callback fired after an arrow/skip-button seek. Receives the
+    /// seek direction (`true` = forward) and the widget-side predicted target
+    /// position in seconds.
+    #[inline]
+    pub fn seek_callback(mut self, f: Rc<dyn Fn(bool, f64)>) -> Self {
+        self.seek_callback = Some(f);
         self
     }
 
@@ -441,12 +455,18 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
         if let Err(e) = self.backend.seek_relative(-self.skip_seconds) {
             (self.on_error)(Error::new(e, ErrorCause::SeekBack(self.skip_seconds)));
         }
+        if let Some(cb) = &self.seek_callback {
+            cb(false, *current_time);
+        }
     }
 
     fn action_seek_forward(&self, current_time: &mut f64) {
         *current_time = (*current_time + self.skip_seconds).max(0.);
         if let Err(e) = self.backend.seek_relative(self.skip_seconds) {
             (self.on_error)(Error::new(e, ErrorCause::SeekForward(self.skip_seconds)));
+        }
+        if let Some(cb) = &self.seek_callback {
+            cb(true, *current_time);
         }
     }
 

@@ -233,6 +233,36 @@ pub async fn self_user_id(client: &TelegramClient) -> Option<i64> {
     }
 }
 
+/// Display name (full name, falling back to @username) and phone number of a
+/// Telegram account — for the telemetry identification log. `None` when the
+/// account has neither a name nor a username.
+pub fn user_identity(user: &User) -> Option<(String, Option<String>)> {
+    let full_name = user.full_name();
+    let name = if full_name.trim().is_empty() {
+        user.username()?.to_owned()
+    } else {
+        full_name
+    };
+    Some((name, user.phone().map(str::to_owned)))
+}
+
+/// Fetch the signed-in account's identity (display name + phone) for telemetry.
+/// Used when a saved session resumes at launch, where no `User` object is around.
+pub async fn self_user_identity(client: &TelegramClient) -> Option<(String, Option<String>)> {
+    let request = grammers_client::tl::functions::users::GetUsers {
+        id: vec![grammers_client::tl::enums::InputUser::UserSelf],
+    };
+    match client.inner().invoke(&request).await {
+        Ok(users) => users
+            .into_iter()
+            .find_map(|raw| user_identity(&User::from_raw(client.inner(), raw))),
+        Err(e) => {
+            tracing::warn!("tg: failed to fetch self user identity: {e}");
+            None
+        }
+    }
+}
+
 /// Fetch the next page of dialogs from the iterator.
 /// Returns (dialogs, has_more).
 pub async fn next_dialogs_page(

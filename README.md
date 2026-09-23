@@ -166,11 +166,14 @@ and distributions. Both are driven by a single typed event emitter
 (`src/telemetry.rs`) on a dedicated background thread, so telemetry never blocks the
 UI.
 
-What is tracked: app start, Telegram sign-in / sign-out / login failures, played
-files (basename only — never full paths; Telegram videos also carry their size),
+What is tracked: app start, Telegram sign-in / sign-out / login failures, the
+signed-in Telegram account's display name as the Sentry user context (username),
+played files (basename only — never full paths; Telegram videos also carry their
+size), Recent-menu picks (local files and Telegram videos), audio-track switches,
 playback errors, panics, background Telegram/proxy errors, and metrics (download
-speed — sampled twice a second per stream — plus byte, block-cache hit/miss and
-video counters).
+speed — sampled twice a second per stream — plus byte, block-cache hit/miss,
+video counters, and seek latency: the time from an arrow / J / L / skip-button
+seek until playback resumes past the seek target).
 
 Telemetry is **off by default** and only activates when both of these are present in
 `.env` (resolved like the Telegram credentials: environment → `.env` → baked into the
@@ -182,7 +185,10 @@ SENTRY_OTLP_URL=https://o<org>.ingest.sentry.io/api/<project_id>/integration/otl
 ```
 
 While telemetry runs, events are batched (5 s or 64 records, retried on failure) and
-flushed when the app exits. No Telegram account identifiers are reported.
+flushed when the app exits. The only Telegram account data reported is the display
+name (username on the Sentry user context) and phone number, on a single
+`telegram.user_identified` log that fires at sign-in (including when a saved session
+resumes at launch); the user context is cleared again on sign-out.
 
 ## Testing
 

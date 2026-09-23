@@ -56,6 +56,13 @@ pub enum SignOutReason {
     SessionExpired,
 }
 
+/// Which "recent" list an item was picked from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecentKind {
+    File,
+    Telegram,
+}
+
 /// The typed set of "important events" the app emits. Keep this small and curated —
 /// per-frame noise (poll reads, property warnings) stays in `tracing` only.
 #[derive(Debug, Clone)]
@@ -70,6 +77,12 @@ pub enum TelemetryEvent {
     TelegramLoginFailed {
         reason: String,
     },
+    /// The signed-in Telegram account's display name (+ phone). Sets the Sentry
+    /// user context and is logged once as `telegram.user_identified`.
+    TelegramUserIdentified {
+        name: String,
+        phone: Option<String>,
+    },
     TelegramVideoPlayed {
         file_name: String,
         size_bytes: Option<u64>,
@@ -82,6 +95,16 @@ pub enum TelemetryEvent {
         source: PlaybackSource,
         file_name: Option<String>,
         error: String,
+    },
+    /// The user picked an entry from the Recent menu (local files or Telegram).
+    RecentItemSelected {
+        kind: RecentKind,
+        name: String,
+    },
+    /// A manual audio-track switch took effect on the player.
+    AudioTrackChanged {
+        track_id: i64,
+        label: String,
     },
     Error {
         component: &'static str,
@@ -99,13 +122,32 @@ pub enum TelemetryEvent {
 /// Native-metric records; name/values surface in Sentry's Metrics product.
 #[derive(Debug, Clone, Copy)]
 pub enum Metric {
-    DownloadSpeed { bytes_per_sec: f64 },
-    BytesDownloaded { bytes: u64 },
-    BlocksDownloaded { count: u64 },
-    CacheHits { count: u64 },
-    CacheMisses { count: u64 },
-    VideosPlayed { count: u64 },
-    PlaybackErrors { count: u64 },
+    DownloadSpeed {
+        bytes_per_sec: f64,
+    },
+    BytesDownloaded {
+        bytes: u64,
+    },
+    BlocksDownloaded {
+        count: u64,
+    },
+    CacheHits {
+        count: u64,
+    },
+    CacheMisses {
+        count: u64,
+    },
+    VideosPlayed {
+        count: u64,
+    },
+    PlaybackErrors {
+        count: u64,
+    },
+    /// Milliseconds from an arrow/skip seek until playback position demonstrably
+    /// resumed advancing past the seek target.
+    SeekLatencyMs {
+        ms: f64,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +328,23 @@ fn telemetry_thread(config: TelemetryConfig, rx: Receiver<TelemetryEvent>) {
         match rx.recv_timeout(timeout) {
             Ok(TelemetryEvent::Metric(metric)) => capture_metric(metric),
             Ok(event) => {
+                // Sentry user context, derived from the Telegram identity events.
+                // Runs on this thread, so it applies to every capture the SDK
+                // makes here (metrics, future events).
+                match &event {
+                    TelemetryEvent::TelegramUserIdentified { name, .. } => {
+                        sentry::configure_scope(|scope| {
+                            scope.set_user(Some(sentry::User {
+                                username: Some(name.clone()),
+                                ..Default::default()
+                            }));
+                        });
+                    }
+                    TelemetryEvent::TelegramSignedOut { .. } => {
+                        sentry::configure_scope(|scope| scope.set_user(None));
+                    }
+                    _ => {}
+                }
                 // Derive video-count counters from the playback lifecycle events.
                 match &event {
                     TelemetryEvent::PlaybackStarted { .. } => {
@@ -468,6 +527,18 @@ impl TelemetryEvent {
                 "Telegram login failed",
                 vec![KeyValue::new("reason", reason.clone())],
             ),
+            TelemetryEvent::TelegramUserIdentified { name, phone } => {
+                let mut attrs = vec![KeyValue::new("username", name.clone())];
+                if let Some(phone) = phone {
+                    attrs.push(KeyValue::new("phone", phone.clone()));
+                }
+                (
+                    "telegram.user_identified",
+                    Severity::Info,
+                    "Telegram user identified",
+                    attrs,
+                )
+            }
             TelemetryEvent::TelegramVideoPlayed {
                 file_name,
                 size_bytes,
@@ -506,6 +577,24 @@ impl TelemetryEvent {
                 }
                 ("playback.failed", Severity::Error, "Playback failed", attrs)
             }
+            TelemetryEvent::RecentItemSelected { kind, name } => (
+                "recent.selected",
+                Severity::Info,
+                "Recent item selected",
+                vec![
+                    KeyValue::new("kind", recent_kind_name(*kind)),
+                    KeyValue::new("name", name.clone()),
+                ],
+            ),
+            TelemetryEvent::AudioTrackChanged { track_id, label } => (
+                "audio_track.changed",
+                Severity::Info,
+                "Audio track changed",
+                vec![
+                    KeyValue::new("track_id", *track_id),
+                    KeyValue::new("label", label.clone()),
+                ],
+            ),
             TelemetryEvent::Error { component, message } => (
                 "error",
                 Severity::Error,
@@ -550,6 +639,13 @@ fn source_name(source: PlaybackSource) -> &'static str {
         PlaybackSource::LocalFile => "local",
         PlaybackSource::Url => "url",
         PlaybackSource::Telegram => "telegram",
+    }
+}
+
+fn recent_kind_name(kind: RecentKind) -> &'static str {
+    match kind {
+        RecentKind::File => "file",
+        RecentKind::Telegram => "telegram",
     }
 }
 
@@ -613,6 +709,53 @@ fn flush_batch<E: LogExporter + ?Sized>(
 }
 
 // ---------------------------------------------------------------------------
+// Seek latency tracking
+// ---------------------------------------------------------------------------
+
+/// Position must advance this far (seconds) past the seek target before the seek
+/// counts as "done and playing again" — absorbs the transient position reported
+/// while mpv is still ramping to the target.
+const SEEK_RESUME_TOLERANCE: f64 = 0.5;
+/// A pending seek older than this is dropped without a metric (e.g. the user
+/// seeked while paused and never unpaused).
+pub const SEEK_PENDING_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Tracks an arrow/skip seek until playback demonstrably resumes past the target.
+/// Feed the player's `time_pos` every frame via [`SeekTracker::poll`]; callers
+/// drop the tracker after [`SeekTracker::elapsed`] exceeds [`SEEK_PENDING_TIMEOUT`].
+///
+/// The check is direction-agnostic: after any seek, playback continues *forward*
+/// from the target, so "resumed" means the position climbed past
+/// `target + SEEK_RESUME_TOLERANCE`. A seek performed while paused holds the
+/// position at the target, so the latency (correctly) includes the pause.
+#[derive(Debug, Clone)]
+pub struct SeekTracker {
+    started: Instant,
+    target: f64,
+}
+
+impl SeekTracker {
+    /// `target` is the widget-side predicted position after the skip.
+    pub fn new(target: f64, _forward: bool) -> Self {
+        Self {
+            started: Instant::now(),
+            target,
+        }
+    }
+
+    /// Feed the current playback position; returns the seek latency in
+    /// milliseconds once playback is past the target, otherwise `None`.
+    pub fn poll(&mut self, position: f64) -> Option<f64> {
+        (position >= self.target + SEEK_RESUME_TOLERANCE)
+            .then(|| self.started.elapsed().as_secs_f64() * 1000.0)
+    }
+
+    pub fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Metrics → sentry::metrics
 // ---------------------------------------------------------------------------
 
@@ -641,6 +784,11 @@ fn capture_metric(metric: Metric) {
         }
         Metric::PlaybackErrors { count } => {
             metrics::counter("playback.errors", count as f64).capture();
+        }
+        Metric::SeekLatencyMs { ms } => {
+            metrics::distribution("player.seek.latency", ms)
+                .attribute("unit", "ms")
+                .capture();
         }
     }
 }
@@ -741,6 +889,95 @@ mod tests {
         .to_record(&logger)
         .expect("event should map to a record");
         assert_eq!(attr(&record, "size_bytes"), Some(1_000_000i64.into()));
+    }
+
+    #[test]
+    fn recent_and_audio_track_events_map() {
+        let logger = test_logger();
+
+        let record = TelemetryEvent::RecentItemSelected {
+            kind: RecentKind::File,
+            name: "clip.mp4".into(),
+        }
+        .to_record(&logger)
+        .expect("event should map to a record");
+        assert_eq!(record.event_name(), Some("recent.selected"));
+        assert_eq!(attr(&record, "kind"), Some("file".into()));
+        assert_eq!(attr(&record, "name"), Some("clip.mp4".into()));
+
+        let record = TelemetryEvent::RecentItemSelected {
+            kind: RecentKind::Telegram,
+            name: "boat trip".into(),
+        }
+        .to_record(&logger)
+        .expect("event should map to a record");
+        assert_eq!(attr(&record, "kind"), Some("telegram".into()));
+
+        let record = TelemetryEvent::AudioTrackChanged {
+            track_id: 3,
+            label: "English 5.1".into(),
+        }
+        .to_record(&logger)
+        .expect("event should map to a record");
+        assert_eq!(record.event_name(), Some("audio_track.changed"));
+        assert_eq!(attr(&record, "track_id"), Some(3i64.into()));
+        assert_eq!(attr(&record, "label"), Some("English 5.1".into()));
+    }
+
+    #[test]
+    fn seek_tracker_reports_latency_once_resumed() {
+        // Position sits at (or just under) the target — typical right after the
+        // seek, or while paused: not resumed yet.
+        let mut tracker = SeekTracker::new(50.0, true);
+        assert_eq!(tracker.poll(50.0), None);
+        assert_eq!(tracker.poll(50.4), None);
+        // Advanced past target + tolerance: playback is running again.
+        let ms = tracker.poll(50.6).expect("resumed");
+        assert!(ms > 0.0, "latency must be positive");
+        // The tracker has no internal state flip — the caller must drop it after
+        // the first hit (main.rs takes it out of the shared slot), which prevents
+        // duplicates.
+        assert!(tracker.poll(60.0).is_some());
+    }
+
+    #[test]
+    fn seek_tracker_handles_backward_seek_and_end_of_file() {
+        // Backward seek: before it executes the position is above the target, so
+        // "resumed" must mean climbing back past target + tolerance.
+        let mut tracker = SeekTracker::new(10.0, false);
+        assert_eq!(tracker.poll(10.4), None);
+        assert!(tracker.poll(10.6).is_some());
+
+        // Forward seek near the end: position pins at the duration, past target.
+        let mut tracker = SeekTracker::new(59.5, true);
+        assert!(tracker.poll(60.0).is_some());
+    }
+
+    #[test]
+    fn user_identified_event_carries_name_and_phone() {
+        let logger = test_logger();
+
+        let record = TelemetryEvent::TelegramUserIdentified {
+            name: "Jane Doe".into(),
+            phone: Some("+15551234567".into()),
+        }
+        .to_record(&logger)
+        .expect("event should map to a record");
+        assert_eq!(record.event_name(), Some("telegram.user_identified"));
+        assert_eq!(record.severity_number(), Some(Severity::Info));
+        assert_eq!(attr(&record, "username"), Some("Jane Doe".into()));
+        assert_eq!(attr(&record, "phone"), Some("+15551234567".into()));
+
+        // Phone is optional.
+        let record = TelemetryEvent::TelegramUserIdentified {
+            name: "No Phone".into(),
+            phone: None,
+        }
+        .to_record(&logger)
+        .expect("event should map to a record");
+        assert_eq!(record.event_name(), Some("telegram.user_identified"));
+        assert_eq!(attr(&record, "username"), Some("No Phone".into()));
+        assert_eq!(attr(&record, "phone"), None);
     }
 
     #[test]

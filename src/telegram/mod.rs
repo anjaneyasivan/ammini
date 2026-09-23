@@ -170,6 +170,12 @@ async fn run_telegram(
             tracing::info!("telegram: already authorized");
             self_user_id = client::self_user_id(&client).await;
             crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramSignedIn);
+            if let Some((name, phone)) = client::self_user_identity(&client).await {
+                crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramUserIdentified {
+                    name,
+                    phone,
+                });
+            }
             let _ = ui_tx.send(UiMessage::AuthSuccess);
             let mut iter = client.iter_dialogs();
             match client::next_dialogs_page(&mut iter, client::DIALOG_PAGE_SIZE).await {
@@ -225,6 +231,14 @@ async fn run_telegram(
                         );
                         self_user_id = Some(user.id().bare_id_unchecked());
                         crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramSignedIn);
+                        if let Some((name, phone)) = client::user_identity(&user) {
+                            crate::telemetry::emit(
+                                crate::telemetry::TelemetryEvent::TelegramUserIdentified {
+                                    name,
+                                    phone,
+                                },
+                            );
+                        }
                         let _ = ui_tx.send(UiMessage::AuthSuccess);
                         let mut iter = client.iter_dialogs();
                         match client::next_dialogs_page(&mut iter, client::DIALOG_PAGE_SIZE).await {
@@ -278,6 +292,14 @@ async fn run_telegram(
                         tracing::info!("telegram: 2FA ok (user {})", user.id().bare_id_unchecked());
                         self_user_id = Some(user.id().bare_id_unchecked());
                         crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramSignedIn);
+                        if let Some((name, phone)) = client::user_identity(&user) {
+                            crate::telemetry::emit(
+                                crate::telemetry::TelemetryEvent::TelegramUserIdentified {
+                                    name,
+                                    phone,
+                                },
+                            );
+                        }
                         let _ = ui_tx.send(UiMessage::AuthSuccess);
                         let mut iter = client.iter_dialogs();
                         match client::next_dialogs_page(&mut iter, client::DIALOG_PAGE_SIZE).await {

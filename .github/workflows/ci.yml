@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libmpv
+        run: brew install mpv
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --lib
+
+      - name: Font stack tests
+        run: cargo test --test emoji_support
+
+      # Offline proxy integration tests (fake VideoSource, temp cache, real axum server).
+      # The live `hevc_proxy` test needs a real Telegram session and is not run in CI.
+      - name: Proxy tests
+        run: cargo test --test proxy_video

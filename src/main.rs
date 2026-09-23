@@ -1,5 +1,7 @@
 use eframe::{App, Frame, NativeOptions, egui};
+use egui_material_icons::icons::*;
 use egui_sharkplayer::{PlayerState, SharkPlayer};
+use min_mpv::fonts::icon_label;
 use min_mpv::fsm::{PersistentState, PlayerEvent, PlayerFsm};
 use min_mpv::telegram::config::TelegramConfig;
 use min_mpv::telegram::panel::TelegramPanel;
@@ -14,6 +16,47 @@ use tracing::{debug, info, trace};
 const APP_KEY: &str = "min_mpv_state";
 const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
 
+/// Material icons for the on-video control bar (play/pause, seek, volume, fullscreen)
+/// rendered by egui-sharkplayer. The crate's default provider uses plain text ("<<",
+/// ">>", "▶"…) for these; our bundled material-icons font covers them properly.
+struct PlayerControlIcons;
+
+impl egui_sharkplayer::ControlsIconProvider for PlayerControlIcons {
+    fn play(&self) -> egui::WidgetText {
+        ICON_PLAY_ARROW.into()
+    }
+    fn pause(&self) -> egui::WidgetText {
+        ICON_PAUSE.into()
+    }
+    fn skip_backward(&self) -> egui::WidgetText {
+        ICON_SKIP_PREVIOUS.into()
+    }
+    fn skip_forward(&self) -> egui::WidgetText {
+        ICON_SKIP_NEXT.into()
+    }
+    fn info(&self) -> egui::WidgetText {
+        ICON_INFO.into()
+    }
+    fn muted_volume(&self) -> egui::WidgetText {
+        ICON_VOLUME_OFF.into()
+    }
+    fn low_volume(&self) -> egui::WidgetText {
+        ICON_VOLUME_MUTE.into()
+    }
+    fn medium_volume(&self) -> egui::WidgetText {
+        ICON_VOLUME_DOWN.into()
+    }
+    fn high_volume(&self) -> egui::WidgetText {
+        ICON_VOLUME_UP.into()
+    }
+    fn fullscreen(&self) -> egui::WidgetText {
+        ICON_FULLSCREEN.into()
+    }
+    fn fullscreen_exit(&self) -> egui::WidgetText {
+        ICON_FULLSCREEN_EXIT.into()
+    }
+}
+
 struct MinMpvApp {
     fsm: StateMachine<PlayerFsm>,
     url_input: String,
@@ -23,6 +66,9 @@ struct MinMpvApp {
     show_telegram: bool,
     bg_tx: Option<UnboundedSender<BgCommand>>,
     ui_rx: UnboundedReceiver<UiMessage>,
+    /// egui id of the video surface, captured each frame so global shortcuts don't
+    /// double-handle keys the SharkPlayer widget already owns while focused.
+    video_focus_id: Option<egui::Id>,
 }
 
 impl MinMpvApp {
@@ -34,6 +80,9 @@ impl MinMpvApp {
         // Install the custom font stack (modern emoji + system script fallbacks) before
         // any UI is drawn.
         min_mpv::fonts::install(&cc.egui_ctx);
+        // Material icon glyphs must be registered AFTER `fonts::install` (which uses
+        // `set_fonts` and would replace them); `initialize` uses `add_font`, which merges.
+        egui_material_icons::initialize(&cc.egui_ctx);
 
         let player = PlayerState::new(cc).map_err(|e| {
             Box::new(std::io::Error::new(
@@ -48,16 +97,25 @@ impl MinMpvApp {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
 
-        let fsm = PlayerFsm {
+        let player_fsm = PlayerFsm {
             player,
             proxy_url: None,
-            playlist: Vec::new(),
-            current_index: None,
+            playlist: persistent.playlist.clone(),
+            current_index: persistent
+                .current_index
+                .filter(|&i| i < persistent.playlist.len()),
             show_playlist: false,
             persistent,
             status: String::from("Drop a video or press Ctrl/Cmd+O to open"),
+            resume_pending: None,
+            last_resume_write: None,
+        };
+        if let Some(volume) = player_fsm.persistent.volume {
+            if let Err(e) = player_fsm.player.set_volume(volume) {
+                tracing::warn!("failed to restore volume {volume}: {e}");
+            }
         }
-        .state_machine();
+        let fsm = player_fsm.state_machine();
 
         let mut telegram_fsm = TelegramFsm::new().state_machine();
         telegram_fsm.init();
@@ -71,6 +129,7 @@ impl MinMpvApp {
             show_telegram: false,
             bg_tx,
             ui_rx,
+            video_focus_id: None,
         };
         app.fsm.init();
         info!("app initialized");
@@ -149,6 +208,47 @@ impl MinMpvApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context, events: &mut Vec<PlayerEvent>) {
+        // Let text fields (URL dialog, Telegram auth inputs) own the keyboard.
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
+
+        // Transport keys are handled by the SharkPlayer widget while the video surface
+        // has focus; these app-level fallbacks cover clicks elsewhere in the window.
+        let video_focused = self
+            .video_focus_id
+            .is_some_and(|id| ctx.memory(|m| m.has_focus(id)));
+        if !video_focused {
+            if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
+                if let Err(e) = self.player_mut().toggle_pause() {
+                    tracing::warn!("failed to toggle pause: {e}");
+                }
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::M)) {
+                if let Err(e) = self.player_mut().toggle_mute() {
+                    tracing::warn!("failed to toggle mute: {e}");
+                }
+            }
+            let volume_delta = if ctx.input(|i| {
+                i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals)
+            }) {
+                Some(5.0)
+            } else if ctx.input(|i| i.key_pressed(egui::Key::Minus)) {
+                Some(-5.0)
+            } else {
+                None
+            };
+            if let Some(delta) = volume_delta {
+                if let Ok(current) = self.player_mut().volume() {
+                    let _ = self.player_mut().set_volume((current + delta).clamp(0.0, 100.0));
+                }
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::F)) {
+                let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+            }
+        }
+
         if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift)
         {
             if let Some(e) = self.open_file_dialog() {
@@ -190,13 +290,15 @@ impl MinMpvApp {
                     ui.text_edit_singleline(&mut self.url_input);
                 });
                 ui.horizontal(|ui| {
-                    if ui.button("Load").clicked() && !self.url_input.trim().is_empty() {
+                    if ui.button(icon_label(ICON_CHECK, "Load")).clicked()
+                        && !self.url_input.trim().is_empty()
+                    {
                         let url = self.url_input.trim().to_string();
                         info!("user submitted URL: {url}");
                         events.push(PlayerEvent::OpenUrl(url));
                         close = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(icon_label(ICON_CLOSE, "Cancel")).clicked() {
                         close = true;
                     }
                 });
@@ -209,34 +311,35 @@ impl MinMpvApp {
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui, events: &mut Vec<PlayerEvent>) {
+        let mut clear_resume = false;
         ui.horizontal(|ui| {
-            if ui.button("Open File").clicked() {
+            if ui.button(icon_label(ICON_FILE_OPEN, "Open File")).clicked() {
                 if let Some(e) = self.open_file_dialog() {
                     events.push(e);
                 }
             }
-            if ui.button("Open Folder").clicked() {
+            if ui.button(icon_label(ICON_FOLDER_OPEN, "Open Folder")).clicked() {
                 events.extend(self.open_folder_dialog());
             }
-            if ui.button("Open URL").clicked() {
+            if ui.button(icon_label(ICON_LINK, "Open URL")).clicked() {
                 self.show_url_dialog = true;
             }
             ui.separator();
-            if ui.button("Prev").clicked() {
+            if ui.button(icon_label(ICON_SKIP_PREVIOUS, "Prev")).clicked() {
                 events.push(PlayerEvent::Previous);
             }
-            if ui.button("Next").clicked() {
+            if ui.button(icon_label(ICON_SKIP_NEXT, "Next")).clicked() {
                 events.push(PlayerEvent::Next);
             }
             ui.separator();
-            if ui.button("Playlist").clicked() {
+            if ui.button(icon_label(ICON_PLAYLIST_PLAY, "Playlist")).clicked() {
                 events.push(PlayerEvent::TogglePlaylist);
             }
-            if ui.button("Telegram").clicked() {
+            if ui.button(icon_label(ICON_SEND, "Telegram")).clicked() {
                 self.show_telegram = !self.show_telegram;
             }
 
-            ui.menu_button("Recent", |ui| {
+            ui.menu_button(icon_label(ICON_HISTORY, "Recent"), |ui| {
                 if self.fsm.persistent.recent_files.is_empty() {
                     ui.weak("No recent files");
                 } else {
@@ -246,8 +349,16 @@ impl MinMpvApp {
                             ui.close();
                         }
                     }
+                    ui.separator();
+                    if ui.button("Clear saved positions").clicked() {
+                        clear_resume = true;
+                    }
                 }
             });
+            if clear_resume {
+                // SAFETY: resume positions are plain UI data, not state-machine invariants.
+                unsafe { &mut self.fsm.inner_mut().persistent.resume }.clear();
+            }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add(egui::Label::new(&self.fsm.status).truncate());
@@ -333,7 +444,9 @@ impl App for MinMpvApp {
         }
 
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.add(SharkPlayer::new(self.player_mut()));
+            let player_response =
+                ui.add(SharkPlayer::new_with_icons(self.player_mut(), PlayerControlIcons));
+            self.video_focus_id = Some(player_response.id);
         });
     }
 
@@ -342,6 +455,11 @@ impl App for MinMpvApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Ok(volume) = self.player_mut().volume() {
+            // SAFETY: volume is plain UI data, not a state-machine invariant.
+            let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
+            persistent.volume = Some(volume);
+        }
         if let Ok(s) = serde_json::to_string(&self.fsm.persistent) {
             storage.set_string(APP_KEY, s);
         }

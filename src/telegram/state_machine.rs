@@ -149,6 +149,13 @@ impl TelegramFsm {
                 info!("telegram: phone submitted, awaiting code");
                 Transition(TelegramState::awaiting_code())
             }
+            TelegramEvent::AuthSucceeded => Transition(TelegramState::chat_list()),
+            TelegramEvent::DialogsLoaded(dialogs, has_more, replace) => {
+                // A session may resolve as authorized while the login screen is up;
+                // keep the dialogs so the chat list isn't empty when we land on it.
+                self.data.update_dialogs(dialogs, *has_more, *replace);
+                Handled
+            }
             TelegramEvent::NeedsAuth => {
                 self.data.error = None;
                 Handled
@@ -175,6 +182,12 @@ impl TelegramFsm {
                 Transition(TelegramState::awaiting_password())
             }
             TelegramEvent::AuthSucceeded => Transition(TelegramState::chat_list()),
+            TelegramEvent::DialogsLoaded(dialogs, has_more, replace) => {
+                // Dialogs may already be in flight while auth completes; keep them so
+                // the chat list isn't empty once we transition.
+                self.data.update_dialogs(dialogs, *has_more, *replace);
+                Handled
+            }
             TelegramEvent::AuthFailed(msg) => {
                 self.data.error = Some(msg.clone());
                 Transition(TelegramState::unauthenticated())
@@ -200,6 +213,10 @@ impl TelegramFsm {
                 Handled
             }
             TelegramEvent::AuthSucceeded => Transition(TelegramState::chat_list()),
+            TelegramEvent::DialogsLoaded(dialogs, has_more, replace) => {
+                self.data.update_dialogs(dialogs, *has_more, *replace);
+                Handled
+            }
             TelegramEvent::AuthFailed(msg) => {
                 self.data.error = Some(msg.clone());
                 Transition(TelegramState::unauthenticated())
@@ -406,5 +423,49 @@ mod tests {
             true,
         ));
         assert_eq!(fsm.data.messages.len(), 3);
+    }
+
+    #[test]
+    fn auth_succeeded_in_unauthenticated_opens_chat_list() {
+        let mut fsm = TelegramFsm::new().state_machine();
+        fsm.init();
+        fsm.handle(&TelegramEvent::NeedsAuth);
+        assert!(matches!(fsm.state(), TelegramState::Unauthenticated {}));
+
+        fsm.handle(&TelegramEvent::AuthSucceeded);
+        assert!(
+            matches!(fsm.state(), TelegramState::ChatList {}),
+            "AuthSucceeded must not be dropped in Unauthenticated"
+        );
+    }
+
+    #[test]
+    fn dialogs_loaded_while_awaiting_code_are_kept() {
+        let mut fsm = TelegramFsm::new().state_machine();
+        fsm.init();
+        fsm.handle(&TelegramEvent::NeedsAuth);
+        fsm.handle(&TelegramEvent::PhoneSubmitted("+1 234".into()));
+        assert!(matches!(fsm.state(), TelegramState::AwaitingCode {}));
+
+        let dialogs: Vec<DialogInfo> = (0..3)
+            .map(|i| DialogInfo {
+                peer_ref: peer_ref(i + 1),
+                name: format!("Chat {i}"),
+                last_message: None,
+            })
+            .collect();
+        fsm.handle(&TelegramEvent::DialogsLoaded(dialogs.clone(), true, true));
+        // Still mid-login: stay in the auth flow, but keep the dialogs so the chat
+        // list isn't empty once auth completes.
+        assert!(matches!(fsm.state(), TelegramState::AwaitingCode {}));
+        assert_eq!(fsm.data.dialogs.len(), 3);
+
+        fsm.handle(&TelegramEvent::AuthSucceeded);
+        assert!(matches!(fsm.state(), TelegramState::ChatList {}));
+        assert_eq!(
+            fsm.data.dialogs.len(),
+            3,
+            "dialogs must survive into the chat list"
+        );
     }
 }

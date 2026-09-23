@@ -283,17 +283,18 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
         self
     }
 
+    /// `MM:SS` with zero-padded whole seconds, e.g. `04:32`. The digit count is fixed
+    /// (5 chars for any time under an hour), so the label layout doesn't change as the
+    /// seek position advances.
     fn format_time_mm_ss(time: f64) -> String {
-        format!("{m:02.0}:{s:05.3}", m = (time / 60.).floor(), s = time % 60.)
+        let t = time.max(0.0) as u64;
+        format!("{:02}:{:02}", t / 60, t % 60)
     }
 
+    /// `HH:MM:SS` with zero-padded whole seconds, e.g. `01:04:32` (fixed 8 chars).
     fn format_time_hh_mm_ss(time: f64) -> String {
-        format!(
-            "{h:02.0}:{m:02.0}:{s:05.3}",
-            h = (time / 3600.).floor(),
-            m = ((time % 3600.) / 60.).floor(),
-            s = time % 60.,
-        )
+        let t = time.max(0.0) as u64;
+        format!("{:02}:{:02}:{:02}", t / 3600, (t % 3600) / 60, t % 60)
     }
 
     fn player_size(&self, ui: &mut egui::Ui, aspect_ratio: f32) -> egui::Vec2 {
@@ -586,20 +587,36 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
         }
     }
 
+    /// Render a time string in a cell sized to the widest layout its format can
+    /// produce (`00:00` / `00:00:00`). The label fonts (Inter) have proportional
+    /// digits, so without this the adjacent seekbar would shift a few points every
+    /// time a digit changes.
+    fn fixed_time_label(ui: &mut egui::Ui, text: String, template: &str) {
+        let font_id = egui::TextStyle::Body.resolve(ui.style());
+        let width = ui.fonts_mut(|f| {
+            template.chars().map(|c| f.glyph_width(&font_id, c)).sum::<f32>()
+        });
+        let height = ui.text_style_height(&egui::TextStyle::Body);
+        ui.add_sized(
+            egui::vec2(width, height),
+            egui::Label::new(text).halign(egui::Align::RIGHT),
+        );
+    }
+
     fn time_label(ui: &mut egui::Ui, current_time: f64, duration: f64) {
         // Current time label
         if duration >= HOUR {
-            ui.label(Self::format_time_hh_mm_ss(current_time));
+            Self::fixed_time_label(ui, Self::format_time_hh_mm_ss(current_time), "00:00:00");
         } else {
-            ui.label(Self::format_time_mm_ss(current_time));
+            Self::fixed_time_label(ui, Self::format_time_mm_ss(current_time), "00:00");
         }
     }
 
     fn duration_label(ui: &mut egui::Ui, duration: f64) {
         if duration >= HOUR {
-            ui.label(Self::format_time_hh_mm_ss(duration));
+            Self::fixed_time_label(ui, Self::format_time_hh_mm_ss(duration), "00:00:00");
         } else {
-            ui.label(Self::format_time_mm_ss(duration));
+            Self::fixed_time_label(ui, Self::format_time_mm_ss(duration), "00:00");
         }
     }
 
@@ -855,5 +872,41 @@ fn paint(
 
         let prev_fb = std::num::NonZeroU32::new(prev_read_fb).map(eframe::glow::NativeFramebuffer);
         gl.bind_framebuffer(eframe::glow::READ_FRAMEBUFFER, prev_fb);
+    }
+}
+
+#[cfg(test)]
+mod time_format_tests {
+    use super::DefaultControlsIconProvider;
+    use super::SharkPlayer;
+
+    type P = SharkPlayer<'static, DefaultControlsIconProvider>;
+
+    #[test]
+    fn mm_ss_zero_pads_minutes_and_seconds() {
+        assert_eq!(P::format_time_mm_ss(0.0), "00:00");
+        assert_eq!(P::format_time_mm_ss(5.0), "00:05");
+        assert_eq!(P::format_time_mm_ss(65.0), "01:05");
+        assert_eq!(P::format_time_mm_ss(3599.0), "59:59");
+    }
+
+    #[test]
+    fn mm_ss_floors_fractional_seconds() {
+        // No rounding up into the next second: 59.999 shows 59, never 60.
+        assert_eq!(P::format_time_mm_ss(59.999), "00:59");
+        assert_eq!(P::format_time_mm_ss(90.7), "01:30");
+    }
+
+    #[test]
+    fn hh_mm_ss_pads_and_floors() {
+        assert_eq!(P::format_time_hh_mm_ss(3600.0), "01:00:00");
+        assert_eq!(P::format_time_hh_mm_ss(3725.5), "01:02:05");
+        assert_eq!(P::format_time_hh_mm_ss(3661.0), "01:01:01");
+    }
+
+    #[test]
+    fn negative_times_clamp_to_zero() {
+        assert_eq!(P::format_time_mm_ss(-3.0), "00:00");
+        assert_eq!(P::format_time_hh_mm_ss(-1.0), "00:00:00");
     }
 }

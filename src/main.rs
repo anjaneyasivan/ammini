@@ -1,10 +1,9 @@
 use eframe::{App, Frame, NativeOptions, egui};
-use egui_material_icons::icons::*;
+use egui_material_icons::{MaterialIcon, icons::*};
 use egui_sharkplayer::{PlayerState, SharkPlayer};
 use min_mpv::fonts::icon_label;
 use min_mpv::fsm::{
-    PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, audio_track_label,
-    record_recent_telegram,
+    PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, record_recent_telegram, track_label,
 };
 use min_mpv::telegram::config::TelegramConfig;
 use min_mpv::telegram::panel::TelegramPanel;
@@ -24,45 +23,54 @@ const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
 /// ">>", "▶"…) for these; our bundled material-icons font covers them properly.
 struct PlayerControlIcons;
 
+/// Icon size for the on-video control bar. The crate lays the bar out at 40px and
+/// buttons inherit egui's 13px `TextStyle::Button`, which reads small over video.
+const PLAYER_ICON_SIZE: f32 = 20.0;
+
+fn player_icon(icon: MaterialIcon) -> egui::WidgetText {
+    icon.rich_text().size(PLAYER_ICON_SIZE).into()
+}
+
 impl egui_sharkplayer::ControlsIconProvider for PlayerControlIcons {
     fn play(&self) -> egui::WidgetText {
-        ICON_PLAY_ARROW.into()
+        player_icon(ICON_PLAY_ARROW)
     }
     fn pause(&self) -> egui::WidgetText {
-        ICON_PAUSE.into()
+        player_icon(ICON_PAUSE)
     }
     fn skip_backward(&self) -> egui::WidgetText {
-        ICON_SKIP_PREVIOUS.into()
+        player_icon(ICON_SKIP_PREVIOUS)
     }
     fn skip_forward(&self) -> egui::WidgetText {
-        ICON_SKIP_NEXT.into()
+        player_icon(ICON_SKIP_NEXT)
     }
     fn info(&self) -> egui::WidgetText {
-        ICON_INFO.into()
+        player_icon(ICON_INFO)
     }
     fn muted_volume(&self) -> egui::WidgetText {
-        ICON_VOLUME_OFF.into()
+        player_icon(ICON_VOLUME_OFF)
     }
     fn low_volume(&self) -> egui::WidgetText {
-        ICON_VOLUME_MUTE.into()
+        player_icon(ICON_VOLUME_MUTE)
     }
     fn medium_volume(&self) -> egui::WidgetText {
-        ICON_VOLUME_DOWN.into()
+        player_icon(ICON_VOLUME_DOWN)
     }
     fn high_volume(&self) -> egui::WidgetText {
-        ICON_VOLUME_UP.into()
+        player_icon(ICON_VOLUME_UP)
     }
     fn fullscreen(&self) -> egui::WidgetText {
-        ICON_FULLSCREEN.into()
+        player_icon(ICON_FULLSCREEN)
     }
     fn fullscreen_exit(&self) -> egui::WidgetText {
-        ICON_FULLSCREEN_EXIT.into()
+        player_icon(ICON_FULLSCREEN_EXIT)
     }
 }
 
-/// An audio track discovered via mpv's scalar `track-list/N/*` sub-properties.
+/// A media track (audio or subtitle) discovered via mpv's scalar `track-list/N/*`
+/// sub-properties.
 #[derive(Clone)]
-struct AudioTrack {
+struct MediaTrack {
     id: i64,
     label: String,
     selected: bool,
@@ -81,9 +89,12 @@ struct MinMpvApp {
     /// double-handle keys the SharkPlayer widget already owns while focused.
     video_focus_id: Option<egui::Id>,
     /// Audio tracks of the currently loaded media (empty until media is loaded).
-    audio_tracks: Vec<AudioTrack>,
-    /// Last seen `track-list/count`, so the list is only rebuilt when it changes.
+    audio_tracks: Vec<MediaTrack>,
+    /// Subtitle tracks of the currently loaded media (empty until media is loaded).
+    subtitle_tracks: Vec<MediaTrack>,
+    /// Last seen `track-list/count`, so the lists are only rebuilt when it changes.
     audio_track_count: i64,
+    subtitle_track_count: i64,
 }
 
 impl MinMpvApp {
@@ -148,6 +159,8 @@ impl MinMpvApp {
             video_focus_id: None,
             audio_tracks: Vec::new(),
             audio_track_count: 0,
+            subtitle_tracks: Vec::new(),
+            subtitle_track_count: 0,
         };
         app.fsm.init();
         info!("app initialized");
@@ -309,7 +322,7 @@ impl MinMpvApp {
                     ui.text_edit_singleline(&mut self.url_input);
                 });
                 ui.horizontal(|ui| {
-                    if ui.button(icon_label(ICON_CHECK, "Load")).clicked()
+                    if ui.button(icon_label(ui, ICON_CHECK, "Load")).clicked()
                         && !self.url_input.trim().is_empty()
                     {
                         let url = self.url_input.trim().to_string();
@@ -317,7 +330,7 @@ impl MinMpvApp {
                         events.push(PlayerEvent::OpenUrl(url));
                         close = true;
                     }
-                    if ui.button(icon_label(ICON_CLOSE, "Cancel")).clicked() {
+                    if ui.button(icon_label(ui, ICON_CLOSE, "Cancel")).clicked() {
                         close = true;
                     }
                 });
@@ -329,21 +342,27 @@ impl MinMpvApp {
         }
     }
 
-    /// Refresh the audio track list from mpv. Only the scalar `track-list/N/*`
-    /// sub-properties are read (libmpv2 cannot read the `track-list` node itself);
-    /// the full list is rebuilt only when the track count changes, so steady-state
-    /// costs one property read per frame. Called every frame before the top bar.
-    fn refresh_audio_tracks(&mut self) {
+    /// Refresh the audio and subtitle track lists from mpv. Only the scalar
+    /// `track-list/N/*` sub-properties are read (libmpv2 cannot read the `track-list`
+    /// node itself); each list is rebuilt only when its track count changes, so
+    /// steady-state costs one property read per frame. Called every frame before the
+    /// top bar.
+    fn refresh_tracks(&mut self) {
         let loaded = matches!(self.player_mut().duration(), Ok(Some(_)));
         if !loaded {
             if !self.audio_tracks.is_empty() || self.audio_track_count != 0 {
                 self.audio_tracks.clear();
                 self.audio_track_count = 0;
             }
+            if !self.subtitle_tracks.is_empty() || self.subtitle_track_count != 0 {
+                self.subtitle_tracks.clear();
+                self.subtitle_track_count = 0;
+            }
             return;
         }
 
-        let mut tracks = Vec::new();
+        let mut audio_tracks = Vec::new();
+        let mut subtitle_tracks = Vec::new();
         let count = {
             let mpv = self.player_mut().mpv();
             let count = mpv.get_property("track-list/count").unwrap_or(0);
@@ -351,99 +370,137 @@ impl MinMpvApp {
                 let Ok(kind) = mpv.get_property::<String>(&format!("track-list/{i}/type")) else {
                     continue;
                 };
-                if kind != "audio" {
-                    continue;
-                }
-                let track = AudioTrack {
+                let index = match kind.as_str() {
+                    "audio" => audio_tracks.len(),
+                    "sub" => subtitle_tracks.len(),
+                    _ => continue,
+                };
+                let track = MediaTrack {
                     id: mpv
                         .get_property::<i64>(&format!("track-list/{i}/id"))
                         .unwrap_or(i),
-                    label: audio_track_label(
+                    label: track_label(
                         mpv.get_property::<String>(&format!("track-list/{i}/title"))
                             .ok()
                             .filter(|s| !s.is_empty()),
                         mpv.get_property::<String>(&format!("track-list/{i}/lang"))
                             .ok()
                             .filter(|s| !s.is_empty()),
-                        tracks.len(),
+                        index,
                     ),
                     selected: mpv
                         .get_property::<bool>(&format!("track-list/{i}/selected"))
                         .unwrap_or(false),
                 };
-                tracks.push(track);
+                match kind.as_str() {
+                    "audio" => audio_tracks.push(track),
+                    "sub" => subtitle_tracks.push(track),
+                    _ => {}
+                }
             }
             count
         };
 
-        if count == self.audio_track_count && !tracks.is_empty() {
+        // Rebuild when either count changes or a list transitions empty ↔ non-empty;
+        // otherwise keep the cached lists (labels are stable).
+        let unchanged = count == self.audio_track_count
+            && count == self.subtitle_track_count
+            && audio_tracks.is_empty() == self.audio_tracks.is_empty()
+            && subtitle_tracks.is_empty() == self.subtitle_tracks.is_empty();
+        if unchanged {
             return;
         }
         self.audio_track_count = count;
-        self.audio_tracks = tracks;
+        self.subtitle_track_count = count;
+        self.audio_tracks = audio_tracks;
+        self.subtitle_tracks = subtitle_tracks;
         tracing::debug!(
-            "audio tracks: {:?}",
+            "media tracks: audio={:?} subs={:?}",
             self.audio_tracks
+                .iter()
+                .map(|t| (t.id, t.label.clone(), t.selected))
+                .collect::<Vec<_>>(),
+            self.subtitle_tracks
                 .iter()
                 .map(|t| (t.id, t.label.clone(), t.selected))
                 .collect::<Vec<_>>()
         );
     }
 
+    /// A dropdown listing the given media tracks (audio or subtitle); returns the id of
+    /// the track the user picked, or `None`. Disabled while there are no tracks, with
+    /// `fallback` shown as the menu label then.
+    fn track_switcher_menu(
+        ui: &mut egui::Ui,
+        icon: MaterialIcon,
+        tracks: &[MediaTrack],
+        fallback: &str,
+    ) -> Option<i64> {
+        let current_label = tracks
+            .iter()
+            .find(|t| t.selected)
+            .map(|t| t.label.clone())
+            .unwrap_or_else(|| fallback.to_string());
+        let tracks = tracks.to_vec();
+        let mut chosen = None;
+        ui.add_enabled_ui(!tracks.is_empty(), |ui| {
+            ui.menu_button(icon_label(ui, icon, &current_label), |ui| {
+                for track in &tracks {
+                    if ui.selectable_label(track.selected, &track.label).clicked() {
+                        chosen = Some(track.id);
+                        ui.close();
+                    }
+                }
+            });
+        });
+        chosen
+    }
+
     fn top_bar(&mut self, ui: &mut egui::Ui, events: &mut Vec<PlayerEvent>) {
         let mut clear_resume = false;
-        let mut chosen_aid: Option<i64> = None;
         ui.horizontal(|ui| {
-            if ui.button(icon_label(ICON_FILE_OPEN, "Open File")).clicked()
+            if ui
+                .button(icon_label(ui, ICON_FILE_OPEN, "Open File"))
+                .clicked()
                 && let Some(e) = self.open_file_dialog()
             {
                 events.push(e);
             }
             if ui
-                .button(icon_label(ICON_FOLDER_OPEN, "Open Folder"))
+                .button(icon_label(ui, ICON_FOLDER_OPEN, "Open Folder"))
                 .clicked()
             {
                 events.extend(self.open_folder_dialog());
             }
-            if ui.button(icon_label(ICON_LINK, "Open URL")).clicked() {
+            if ui.button(icon_label(ui, ICON_LINK, "Open URL")).clicked() {
                 self.show_url_dialog = true;
             }
             ui.separator();
-            if ui.button(icon_label(ICON_SKIP_PREVIOUS, "Prev")).clicked() {
+            if ui
+                .button(icon_label(ui, ICON_SKIP_PREVIOUS, "Prev"))
+                .clicked()
+            {
                 events.push(PlayerEvent::Previous);
             }
-            if ui.button(icon_label(ICON_SKIP_NEXT, "Next")).clicked() {
+            if ui.button(icon_label(ui, ICON_SKIP_NEXT, "Next")).clicked() {
                 events.push(PlayerEvent::Next);
             }
             ui.separator();
             if ui
-                .button(icon_label(ICON_PLAYLIST_PLAY, "Playlist"))
+                .button(icon_label(ui, ICON_PLAYLIST_PLAY, "Playlist"))
                 .clicked()
             {
                 events.push(PlayerEvent::TogglePlaylist);
             }
-            if ui.button(icon_label(ICON_SEND, "Telegram")).clicked() {
+            if ui.button(icon_label(ui, ICON_SEND, "Telegram")).clicked() {
                 self.show_telegram = !self.show_telegram;
             }
 
-            // Audio track switcher: disabled until mpv reports any audio tracks.
-            let current_label = self
-                .audio_tracks
-                .iter()
-                .find(|t| t.selected)
-                .map(|t| t.label.clone())
-                .unwrap_or_else(|| "Audio".to_string());
-            let tracks = self.audio_tracks.clone();
-            ui.add_enabled_ui(!tracks.is_empty(), |ui| {
-                ui.menu_button(icon_label(ICON_AUDIOTRACK, &current_label), |ui| {
-                    for track in &tracks {
-                        if ui.selectable_label(track.selected, &track.label).clicked() {
-                            chosen_aid = Some(track.id);
-                            ui.close();
-                        }
-                    }
-                });
-            });
+            // Audio / subtitle track switchers: disabled until mpv reports any tracks.
+            let chosen_aid =
+                Self::track_switcher_menu(ui, ICON_AUDIOTRACK, &self.audio_tracks, "Audio");
+            let chosen_sid =
+                Self::track_switcher_menu(ui, ICON_SUBTITLES, &self.subtitle_tracks, "Subtitles");
             if let Some(id) = chosen_aid {
                 match self.player_mut().mpv().set_property("aid", id) {
                     Ok(()) => {
@@ -454,8 +511,18 @@ impl MinMpvApp {
                     Err(e) => tracing::warn!("failed to switch audio track to {id}: {e}"),
                 }
             }
+            if let Some(id) = chosen_sid {
+                match self.player_mut().mpv().set_property("sid", id) {
+                    Ok(()) => {
+                        for track in &mut self.subtitle_tracks {
+                            track.selected = track.id == id;
+                        }
+                    }
+                    Err(e) => tracing::warn!("failed to switch subtitle track to {id}: {e}"),
+                }
+            }
 
-            ui.menu_button(icon_label(ICON_HISTORY, "Recent"), |ui| {
+            ui.menu_button(icon_label(ui, ICON_HISTORY, "Recent"), |ui| {
                 if self.fsm.persistent.recent_files.is_empty() {
                     ui.weak("No recent files");
                 } else {
@@ -475,7 +542,7 @@ impl MinMpvApp {
                     ui.weak("Recent Telegram files");
                     for entry in self.fsm.persistent.recent_telegram.clone() {
                         let label = format!("{} · {}", entry.chat_name, truncate_path(&entry.name));
-                        if ui.button(icon_label(ICON_PLAY_ARROW, &label)).clicked() {
+                        if ui.button(icon_label(ui, ICON_PLAY_ARROW, &label)).clicked() {
                             if let Some(bg) = &self.bg_tx {
                                 let _ = bg.send(BgCommand::PlayTelegramVideo {
                                     peer: entry.peer,
@@ -501,14 +568,16 @@ impl MinMpvApp {
     fn playlist_panel(&mut self, ui: &mut egui::Ui, events: &mut Vec<PlayerEvent>) {
         ui.label("Playlist");
         ui.separator();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (i, path) in self.fsm.playlist.iter().enumerate() {
-                let selected = self.fsm.current_index == Some(i);
-                if ui.selectable_label(selected, truncate_path(path)).clicked() {
-                    events.push(PlayerEvent::SelectTrack(i));
+        egui::ScrollArea::vertical()
+            .id_salt("playlist")
+            .show(ui, |ui| {
+                for (i, path) in self.fsm.playlist.iter().enumerate() {
+                    let selected = self.fsm.current_index == Some(i);
+                    if ui.selectable_label(selected, truncate_path(path)).clicked() {
+                        events.push(PlayerEvent::SelectTrack(i));
+                    }
                 }
-            }
-        });
+            });
     }
 }
 
@@ -518,7 +587,7 @@ impl App for MinMpvApp {
         let mut events = Vec::new();
 
         while let Ok(msg) = self.ui_rx.try_recv() {
-            trace!("telegram ui message: {msg:?}");
+            debug!("telegram ui message: {msg:?}");
             match msg {
                 UiMessage::ProxyReady { port } => {
                     let url = format!("http://127.0.0.1:{port}");
@@ -561,12 +630,19 @@ impl App for MinMpvApp {
                     }
                 }
             }
+            // One line per drained message, so an empty chat list or thread is instantly
+            // diagnosable from the terminal.
+            debug!(
+                "telegram dialogs={} messages={}",
+                self.telegram_fsm.data.dialogs.len(),
+                self.telegram_fsm.data.messages.len(),
+            );
         }
 
         self.handle_dropped_files(&ctx, &mut events);
         self.handle_shortcuts(&ctx, &mut events);
         self.handle_url_dialog(ui, &mut events);
-        self.refresh_audio_tracks();
+        self.refresh_tracks();
 
         egui::Panel::top("top_bar").show(ui, |ui| {
             self.top_bar(ui, &mut events);

@@ -90,11 +90,10 @@ fn script_fallbacks_cover_when_host_provides_them() {
 #[test]
 fn material_icon_font_registers_and_covers_icons() {
     // Mirrors `MinMpvApp::new`: the custom stack is installed with `set_fonts`, then the
-    // material-icons font is merged in with `Context::add_font`. Icons must resolve
-    // through the Proportional fallback chain, or every button label shows a
-    // missing-glyph box. The merge below replicates `add_font` (Highest priority ->
-    // front of the family list, Lowest -> appended), which the app only applies during
-    // `Context::run()` — not available in a headless test.
+    // material-icons font is merged in with `Context::add_font`. The merge below
+    // replicates `add_font` (Highest priority -> front of the family list, Lowest ->
+    // appended), which the app only applies during `Context::run()` — not available in a
+    // headless test.
     let insert = egui_material_icons::font_insert();
     let mut defs = fonts::font_definitions();
     for family in insert.families {
@@ -108,24 +107,50 @@ fn material_icon_font_registers_and_covers_icons() {
         .insert(insert.name.clone(), Arc::new(insert.data));
 
     let mut fonts = Fonts::new(TextOptions::default(), defs);
-    let chars = fonts
-        .fonts
-        .font(&egui::FontFamily::Proportional)
-        .characters()
-        .clone();
 
+    // Every icon the app renders must be covered by the dedicated `material-icons` face:
+    // `fonts::icon_label` and the icon-only buttons pin their glyphs to that face. The
+    // Proportional chain is deliberately NOT used for icons — its primary face (Inter)
+    // claims several Material PUA codepoints (e.g. play_arrow U+E037), and egui resolves
+    // each char to the first face in the chain that covers it, so a plain string would
+    // render Inter's blank glyph instead of the icon.
+    let mut named = fonts.fonts.font(&egui::FontFamily::Name(
+        egui_material_icons::FONT_FAMILY.into(),
+    ));
+    use egui_material_icons::icons as icon_consts;
     // One icon per UI area: player transport, file/url toolbar, Telegram auth + chat.
     for icon in [
-        egui_material_icons::icons::ICON_PLAY_ARROW,
-        egui_material_icons::icons::ICON_FOLDER_OPEN,
-        egui_material_icons::icons::ICON_SEND,
-        egui_material_icons::icons::ICON_LOGOUT,
+        icon_consts::ICON_PLAY_ARROW,
+        icon_consts::ICON_PAUSE,
+        icon_consts::ICON_SKIP_PREVIOUS,
+        icon_consts::ICON_SKIP_NEXT,
+        icon_consts::ICON_INFO,
+        icon_consts::ICON_VOLUME_OFF,
+        icon_consts::ICON_VOLUME_MUTE,
+        icon_consts::ICON_VOLUME_DOWN,
+        icon_consts::ICON_VOLUME_UP,
+        icon_consts::ICON_FULLSCREEN,
+        icon_consts::ICON_FULLSCREEN_EXIT,
+        icon_consts::ICON_CHECK,
+        icon_consts::ICON_CLOSE,
+        icon_consts::ICON_FILE_OPEN,
+        icon_consts::ICON_FOLDER_OPEN,
+        icon_consts::ICON_LINK,
+        icon_consts::ICON_PLAYLIST_PLAY,
+        icon_consts::ICON_SEND,
+        icon_consts::ICON_AUDIOTRACK,
+        icon_consts::ICON_HISTORY,
+        icon_consts::ICON_REFRESH,
+        icon_consts::ICON_ARROW_BACK,
+        icon_consts::ICON_LOGIN,
+        icon_consts::ICON_EXPAND_MORE,
+        icon_consts::ICON_LOGOUT,
     ] {
         let c = icon.codepoint.chars().next().unwrap();
-        let by = chars.get(&c).unwrap_or_else(|| panic!("no glyph for {c}"));
         assert!(
-            by.iter().any(|f| f == egui_material_icons::FONT_FAMILY),
-            "{c} not covered by the material-icons font: {by:?}"
+            named.has_glyph(c),
+            "{c} (U+{:04X}) not covered by the material-icons font",
+            c as u32
         );
     }
 }

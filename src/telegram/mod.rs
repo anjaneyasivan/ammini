@@ -134,7 +134,9 @@ async fn run_telegram(
     let proxy_state = ProxyState {
         reqwest_client: reqwest::Client::new(),
         video_registry: video_registry.clone(),
-        telegram_client: Some(client.clone_inner()),
+        video_source: Arc::new(client::GrammersVideoSource {
+            client: client.clone_inner(),
+        }),
         cache_dir: cache_dir.clone(),
         video_cache: video_cache.clone(),
     };

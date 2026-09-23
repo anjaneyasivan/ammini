@@ -115,6 +115,59 @@ impl TelegramClient {
     }
 }
 
+/// Abstraction over fetching one 512 KiB block of a Telegram document, so the proxy can
+/// be served from synthetic sources in offline tests instead of a live client.
+/// (Methods return boxed futures rather than RPITIT so the trait stays `dyn`-compatible.)
+pub trait VideoSource: Send + Sync {
+    /// Download the whole block `block` (the final block of the file may be shorter if
+    /// the file size is not a multiple of the block size).
+    fn download_block<'a>(
+        &'a self,
+        document: &'a Document,
+        block: u64,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<u8>, anyhow::Error>> + Send + 'a>,
+    >;
+}
+
+/// Real [`VideoSource`] backed by a grammers client's chunked download iterator.
+pub struct GrammersVideoSource {
+    pub client: Client,
+}
+
+impl VideoSource for GrammersVideoSource {
+    fn download_block<'a>(
+        &'a self,
+        document: &'a Document,
+        block: u64,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<u8>, anyhow::Error>> + Send + 'a>,
+    > {
+        Box::pin(async move { download_block(&self.client, document, block).await })
+    }
+}
+
+/// Download a whole block from Telegram via the client's chunked iterator. `skip_chunks`
+/// positions the iterator exactly at block `block`.
+pub async fn download_block(
+    client: &Client,
+    document: &Document,
+    block: u64,
+) -> Result<Vec<u8>, anyhow::Error> {
+    let skip = u32::try_from(block).map_err(|_| anyhow::anyhow!("block {block} out of range"))?;
+    let mut iter = client
+        .iter_download(document)
+        .chunk_size(crate::telegram::cache::BLOCK_SIZE as i32)
+        .skip_chunks(skip as i32);
+    match iter.next().await {
+        Ok(Some(chunk)) => Ok(chunk),
+        Ok(None) => Err(anyhow::anyhow!(
+            "block {block}: telegram download returned no data"
+        )),
+        Err(e) => Err(anyhow::anyhow!("block {block}: telegram download failed: {e}")),
+    }
+}
+
 /// Fetch the next page of dialogs from the iterator.
 /// Returns (dialogs, has_more).
 pub async fn next_dialogs_page(

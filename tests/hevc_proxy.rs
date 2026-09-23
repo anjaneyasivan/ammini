@@ -11,7 +11,9 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use min_mpv::telegram::cache::BlockCache;
-use min_mpv::telegram::client::{find_first_hevc_video, is_hevc_video, TelegramClient};
+use min_mpv::telegram::client::{
+    find_first_hevc_video, is_hevc_video, GrammersVideoSource, TelegramClient,
+};
 use min_mpv::telegram::config::TelegramConfig;
 use min_mpv::telegram::proxy::{start_server, ProxyState};
 use min_mpv::telegram::session;
@@ -83,7 +85,9 @@ async fn find_first_hevc_video_and_test_proxy_range() {
     let proxy_state = ProxyState {
         reqwest_client: reqwest::Client::new(),
         video_registry: video_registry.clone(),
-        telegram_client: Some(client.clone_inner()),
+        video_source: Arc::new(GrammersVideoSource {
+            client: client.clone_inner(),
+        }),
         cache_dir: std::env::temp_dir().join("min-mpv-test-telegram-cache"),
         video_cache: video_cache.clone(),
     };

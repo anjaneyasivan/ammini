@@ -11,7 +11,6 @@ use axum::{
     Router,
 };
 use bytes::Bytes;
-use grammers_client::Client;
 use reqwest::Client as ReqwestClient;
 use serde::Deserialize;
 use tokio::net::TcpListener;
@@ -19,7 +18,7 @@ use tokio::sync::Mutex;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::telegram::cache::{self, BlockCache};
-use crate::telegram::client::{Document, VideoDownloadInfo};
+use crate::telegram::client::{Document, VideoDownloadInfo, VideoSource};
 
 /// Block size used by the disk cache and the Telegram download iterator. A requested
 /// range may start and end mid-block; the streaming code trims the excess bytes.
@@ -49,9 +48,8 @@ const URL_RESP_WHITELIST: &[&str] = &[
 pub struct ProxyState {
     pub reqwest_client: ReqwestClient,
     pub video_registry: Arc<Mutex<HashMap<i32, VideoDownloadInfo>>>,
-    /// Telegram client used to stream video bytes to the player through the disk block
-    /// cache in `video_cache`.
-    pub telegram_client: Option<Client>,
+    /// Source of Telegram video bytes for the disk block cache.
+    pub video_source: Arc<dyn VideoSource>,
     /// Directory under which per-video block-cache files are created.
     pub cache_dir: PathBuf,
     /// Shared disk block cache: msg_id -> BlockCache. Populated lazily on first request
@@ -220,10 +218,9 @@ async fn handle_telegram(
     }
 
     // Serve the requested range through the shared disk block cache. Missing blocks are
-    // downloaded from Telegram (deduplicated across concurrent requests) and written to
-    // disk; cached blocks are read straight from the file. The telegram client is only
-    // needed when a block is actually missing.
-    let client = state.telegram_client.clone();
+    // downloaded via `video_source` (deduplicated across concurrent requests) and
+    // written to disk; cached blocks are read straight from the file.
+    let source = state.video_source.clone();
     let cache = {
         let mut caches = state.video_cache.lock().await;
         caches
@@ -235,7 +232,7 @@ async fn handle_telegram(
             .clone()
     };
 
-    let stream = telegram_cache_stream(client, cache, video.document.clone(), start, end);
+    let stream = telegram_cache_stream(source, cache, video.document.clone(), start, end);
     build_telegram_response(status, content_range, content_length, Body::from_stream(stream))
 }
 
@@ -299,12 +296,12 @@ fn parse_range(headers: &HeaderMap, total_size: u64) -> Option<(u64, u64)> {
 /// block cache.
 ///
 /// Blocks already on disk are read straight from the cache file. Missing blocks are
-/// downloaded from Telegram via `cache.ensure` — the first request for a block owns the
-/// download, concurrent requests for the same block wait and then read from disk
+/// downloaded via the source through `cache.ensure` — the first request for a block owns
+/// the download, concurrent requests for the same block wait and then read from disk
 /// (cooperative fill). The stream stops once `end` has been delivered; dropping the
 /// receiver stops the loop, which cancels any in-progress download.
 fn telegram_cache_stream(
-    client: Option<Client>,
+    source: Arc<dyn VideoSource>,
     cache: BlockCache,
     document: Document,
     start: u64,
@@ -331,12 +328,10 @@ fn telegram_cache_stream(
                 }
                 // Block is not on disk yet. Ensure it is downloaded (or wait for the
                 // in-flight owner) and then retry the read.
-                let Some(client) = client.clone() else {
-                    break Err(anyhow::anyhow!("telegram client unavailable"));
-                };
+                let source = source.clone();
                 let doc = document.clone();
                 if let Err(e) = cache
-                    .ensure(block, async move { download_block(&client, &doc, block).await })
+                    .ensure(block, async move { source.download_block(&doc, block).await })
                     .await
                 {
                     break Err(e);
@@ -365,30 +360,6 @@ fn telegram_cache_stream(
         }
     });
     ReceiverStream::new(rx)
-}
-
-/// Download the whole 512 KiB block `block` from Telegram (the final block of the file
-/// may be shorter if the file size is not a multiple of the block size). Returns only
-/// this block's bytes, not a covering chunk.
-async fn download_block(
-    client: &Client,
-    document: &Document,
-    block: u64,
-) -> Result<Vec<u8>, anyhow::Error> {
-    let skip = u32::try_from(block).map_err(|_| anyhow::anyhow!("block {block} out of range"))?;
-    // Telegram documents are downloaded as fixed "chunks"; skipping `skip` chunks
-    // positions the iterator exactly at block `block`.
-    let mut iter = client
-        .iter_download(document)
-        .chunk_size(DOWNLOAD_CHUNK_SIZE as i32)
-        .skip_chunks(skip as i32);
-    match iter.next().await {
-        Ok(Some(chunk)) => Ok(chunk),
-        Ok(None) => Err(anyhow::anyhow!(
-            "block {block}: telegram download returned no data"
-        )),
-        Err(e) => Err(anyhow::anyhow!("block {block}: telegram download failed: {e}")),
-    }
 }
 
 fn error_response(status: StatusCode, msg: &str) -> AxumResponse {

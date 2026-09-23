@@ -586,7 +586,7 @@ impl PlayerState {
 
     /// Direct access to the libmpv handle for properties the crate does not wrap
     /// (e.g. audio track switching). The handle is thread-safe; render APIs belong
-    /// to the widget. Patched in min-mpv (vendored copy).
+    /// to the widget. Patched in Ammini (vendored copy).
     pub fn mpv(&self) -> &libmpv2::Mpv {
         &self.mpv.mpv
     }

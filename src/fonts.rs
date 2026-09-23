@@ -156,7 +156,7 @@ pub fn font_definitions() -> egui::FontDefinitions {
 
 /// Install the custom font stack on the egui context. Call once at startup.
 /// The material-icons font is registered afterwards via `egui_material_icons::initialize`
-/// (see `MinMpvApp::new`), which must run AFTER this function: `install` uses
+/// (see `AmminiApp::new`), which must run AFTER this function: `install` uses
 /// `set_fonts` (replaces all fonts), `initialize` uses `add_font` (merges).
 pub fn install(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());

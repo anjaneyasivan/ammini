@@ -1,9 +1,13 @@
-# min-mpv
+# Ammini
 
 A small desktop video player built with Rust, `eframe`/`egui`, and `libmpv` via
 [`egui-sharkplayer`](https://crates.io/crates/egui-sharkplayer) — with a built-in
 **Telegram client** sidebar for browsing chats and streaming videos straight from your
 Telegram account.
+
+> **Building from source?** See **[BUILDING.md](BUILDING.md)** for platform
+> prerequisites, credential handling, release builds, the macOS `.app`/`.dmg` bundler,
+> and troubleshooting.
 
 ## Features
 
@@ -66,7 +70,7 @@ LIBRARY_PATH=/path/to/libmpv/lib cargo build
 
 Install a libmpv build (e.g. from [shinchiro's Windows builds](https://github.com/shinchiro/mpv-winbuild-cmake)
 or [mpv.io](https://mpv.io/installation/)). Make sure the linker can find
-`libmpv.dll.a`/`mpv.lib` and that `libmpv.dll` is next to the final `min-mpv.exe` at
+`libmpv.dll.a`/`mpv.lib` and that `libmpv.dll` is next to the final `ammini.exe` at
 runtime.
 
 ## Setup
@@ -78,13 +82,43 @@ at https://my.telegram.org/apps):
 cp .env.example .env
 ```
 
-The app exits at startup if `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` are missing.
+The app exits at startup if `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` are missing — unless
+they were baked in at build time from `.env` (see below), in which case the binary runs
+without any `.env` next to it.
 
 ## Build & run
 
 ```bash
 cargo run
 ```
+
+Credentials are resolved as: live environment → `.env` (via `dotenvy`) → the value baked
+into the binary at compile time. `build.rs` reads `.env` and re-exports the keys with
+`cargo:rustc-env`, so a `cargo build` picks them up automatically and the resulting
+binary can be copied anywhere.
+
+## macOS app bundle
+
+```bash
+scripts/bundle-macos.sh
+```
+
+Builds a release binary, assembles `dist/Ammini.app`, copies libmpv and its entire dylib
+closure (≈48 libraries) into `Contents/Frameworks` with their install names rewritten to
+`@rpath`, ad-hoc signs everything, and produces `dist/Ammini-<version>.dmg` with the
+usual drag-to-`Applications` layout. The bundle is self-contained — it runs on Macs that
+do not have Homebrew's mpv installed — and only needs the built-in macOS tools
+(`otool`, `install_name_tool`, `codesign`, `hdiutil`).
+
+Worth knowing:
+
+- Everything is ad-hoc signed, which is fine locally and shareable via
+  right-click → Open the first time. Shipping to the public without a Gatekeeper warning
+  needs a Developer ID signature and notarization, which the script does not do.
+- The release build bakes your Telegram credentials into the binary, so treat the DMG as
+  containing them.
+- Homebrew's mpv/ffmpeg are GPL-licensed; redistributing the bundled libraries carries
+  licence obligations, so the script is aimed at personal builds.
 
 ## Shortcuts
 
@@ -141,3 +175,6 @@ deliberately not part of plain `cargo test`.
   OpenGL — don't change the renderer.
 - App state (recent files, playlist, volume, resume positions) is stored in eframe's
   native storage for the app under the `min_mpv_state` key.
+- The Telegram session, video cache and storage key still use the app's former name
+  (`min-mpv` / `min_mpv_state`) on disk, so existing sessions, caches and settings keep
+  working after the rename to Ammini.

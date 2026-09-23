@@ -138,7 +138,7 @@ async fn handle_url(
         }
     }
     if !has_user_agent {
-        rb = rb.header("user-agent", "min-mpv/0.1.0");
+        rb = rb.header("user-agent", "ammini/0.1.0");
     }
 
     let upstream = match rb.send().await {

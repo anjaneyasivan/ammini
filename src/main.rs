@@ -1,20 +1,23 @@
+use ammini::fonts::icon_label;
+use ammini::fsm::{
+    PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, record_recent_telegram, track_label,
+};
+use ammini::telegram::config::TelegramConfig;
+use ammini::telegram::panel::TelegramPanel;
+use ammini::telegram::state_machine::{TelegramEvent, TelegramFsm};
+use ammini::telegram::{BgCommand, UiMessage, start};
 use eframe::{App, Frame, NativeOptions, egui};
 use egui_material_icons::{MaterialIcon, icons::*};
 use egui_sharkplayer::{PlayerState, SharkPlayer};
-use min_mpv::fonts::icon_label;
-use min_mpv::fsm::{
-    PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, record_recent_telegram, track_label,
-};
-use min_mpv::telegram::config::TelegramConfig;
-use min_mpv::telegram::panel::TelegramPanel;
-use min_mpv::telegram::state_machine::{TelegramEvent, TelegramFsm};
-use min_mpv::telegram::{BgCommand, UiMessage, start};
 use rfd::FileDialog;
 use statig::blocking::StateMachine;
 use statig::prelude::*;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, info, trace};
 
+/// eframe storage key. Deliberately kept as the app's former name (`min_mpv_state`)
+/// so existing saves (recent files, playlist, volume, resume positions, recent
+/// Telegram videos) keep loading after the rename to Ammini.
 const APP_KEY: &str = "min_mpv_state";
 const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
 
@@ -76,7 +79,7 @@ struct MediaTrack {
     selected: bool,
 }
 
-struct MinMpvApp {
+struct AmminiApp {
     fsm: StateMachine<PlayerFsm>,
     url_input: String,
     show_url_dialog: bool,
@@ -97,7 +100,7 @@ struct MinMpvApp {
     subtitle_track_count: i64,
 }
 
-impl MinMpvApp {
+impl AmminiApp {
     fn new(
         cc: &eframe::CreationContext<'_>,
         bg_tx: Option<UnboundedSender<BgCommand>>,
@@ -105,12 +108,12 @@ impl MinMpvApp {
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Install the custom font stack (modern emoji + system script fallbacks) before
         // any UI is drawn.
-        min_mpv::fonts::install(&cc.egui_ctx);
+        ammini::fonts::install(&cc.egui_ctx);
         // Material icon glyphs must be registered AFTER `fonts::install` (which uses
         // `set_fonts` and would replace them); `initialize` uses `add_font`, which merges.
         egui_material_icons::initialize(&cc.egui_ctx);
         // macOS-style spacing/radii/theme after the fonts are in place.
-        min_mpv::style::install(&cc.egui_ctx);
+        ammini::style::install(&cc.egui_ctx);
 
         let player = PlayerState::new(cc).map_err(|e| {
             Box::new(std::io::Error::other(format!(
@@ -581,7 +584,7 @@ impl MinMpvApp {
     }
 }
 
-impl App for MinMpvApp {
+impl App for AmminiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
         let ctx = ui.ctx().clone();
         let mut events = Vec::new();
@@ -624,7 +627,7 @@ impl App for MinMpvApp {
                 }
                 other => {
                     if let Some(event) =
-                        min_mpv::telegram::state_machine::ui_message_to_event(&other)
+                        ammini::telegram::state_machine::ui_message_to_event(&other)
                     {
                         self.telegram_fsm.handle(&event);
                     }
@@ -713,9 +716,9 @@ fn truncate_path(path: &str) -> String {
 
 fn main() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("min_mpv=debug"));
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("ammini=debug"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
-    info!("starting min-mpv");
+    info!("starting Ammini");
 
     let telegram_config = match TelegramConfig::from_env() {
         Ok(c) => c,
@@ -732,17 +735,23 @@ fn main() {
 
     let (bg_tx, ui_rx) = start(telegram_config);
 
+    // Bundled app icon: the blue play squircle, cropped to its edge and resized.
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/ammini-icon.png"))
+        .expect("assets/ammini-icon.png must be a valid PNG");
+
     let options = NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([960.0, 640.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([960.0, 640.0])
+            .with_icon(icon),
         renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
 
     eframe::run_native(
-        "min-mpv",
+        "Ammini",
         options,
         Box::new(move |cc| {
-            let app = MinMpvApp::new(cc, Some(bg_tx), ui_rx)?;
+            let app = AmminiApp::new(cc, Some(bg_tx), ui_rx)?;
             Ok(Box::new(app) as Box<dyn App>)
         }),
     )

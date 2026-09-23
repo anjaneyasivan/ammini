@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use min_mpv::telegram::cache::BLOCK_SIZE;
-use min_mpv::telegram::client::{Document, VideoDownloadInfo, VideoSource};
-use min_mpv::telegram::proxy::{ProxyState, start_server};
+use ammini::telegram::cache::BLOCK_SIZE;
+use ammini::telegram::client::{Document, VideoDownloadInfo, VideoSource};
+use ammini::telegram::proxy::{ProxyState, start_server};
 use tokio::sync::Mutex;
 
 /// Deterministic byte at file offset `i`, shared by the fake source and assertions.
@@ -45,7 +45,7 @@ impl VideoSource for FakeSource {
                 tokio::time::sleep(d).await;
             }
             self.downloads.fetch_add(1, Ordering::SeqCst);
-            let (s, e) = min_mpv::telegram::cache::block_extent(block, self.total_size);
+            let (s, e) = ammini::telegram::cache::block_extent(block, self.total_size);
             Ok((s..=e).map(byte_at).collect())
         })
     }
@@ -72,7 +72,7 @@ async fn start_test_server(total_size: u64, source: FakeSource) -> (u16, PathBuf
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let cache_dir =
-        std::env::temp_dir().join(format!("min-mpv-proxy-test-{}-{n}", std::process::id()));
+        std::env::temp_dir().join(format!("ammini-proxy-test-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&cache_dir);
 
     let mut registry = HashMap::new();

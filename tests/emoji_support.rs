@@ -5,9 +5,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use ammini::fonts;
 use eframe::egui;
 use egui::epaint::text::{Fonts, TextOptions};
-use min_mpv::fonts;
 
 fn covered_chars() -> (
     egui::FontDefinitions,

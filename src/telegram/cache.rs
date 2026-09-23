@@ -396,7 +396,7 @@ mod tests {
     fn temp_cache_dir() -> PathBuf {
         let n = DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
-            std::env::temp_dir().join(format!("min-mpv-cache-test-{}-{n}", std::process::id()));
+            std::env::temp_dir().join(format!("ammini-cache-test-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::create_dir_all(&dir);
         dir

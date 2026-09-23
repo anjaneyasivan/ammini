@@ -10,18 +10,18 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 
-use min_mpv::telegram::cache::BlockCache;
-use min_mpv::telegram::client::{
+use ammini::telegram::cache::BlockCache;
+use ammini::telegram::client::{
     GrammersVideoSource, TelegramClient, find_first_hevc_video, is_hevc_video,
 };
-use min_mpv::telegram::config::TelegramConfig;
-use min_mpv::telegram::proxy::{ProxyState, start_server};
-use min_mpv::telegram::session;
+use ammini::telegram::config::TelegramConfig;
+use ammini::telegram::proxy::{ProxyState, start_server};
+use ammini::telegram::session;
 
 #[tokio::test]
 async fn find_first_hevc_video_and_test_proxy_range() {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::new("min_mpv=debug"))
+        .with_env_filter(tracing_subscriber::EnvFilter::new("ammini=debug"))
         .init();
 
     let config = match TelegramConfig::from_env() {
@@ -81,7 +81,7 @@ async fn find_first_hevc_video_and_test_proxy_range() {
 
     // The recent-Telegram replay path refetches with the stored peer (access hash);
     // verify it recovers the same document.
-    let by_id = min_mpv::telegram::client::fetch_video_info(&client, peer, video.msg_id)
+    let by_id = ammini::telegram::client::fetch_video_info(&client, peer, video.msg_id)
         .await
         .expect("failed to refetch video by id");
     assert_eq!(by_id.msg_id, video.msg_id);
@@ -99,7 +99,7 @@ async fn find_first_hevc_video_and_test_proxy_range() {
         video_source: Arc::new(GrammersVideoSource {
             client: client.clone_inner(),
         }),
-        cache_dir: std::env::temp_dir().join("min-mpv-test-telegram-cache"),
+        cache_dir: std::env::temp_dir().join("ammini-test-telegram-cache"),
         video_cache: video_cache.clone(),
     };
 

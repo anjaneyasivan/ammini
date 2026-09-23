@@ -24,6 +24,10 @@ use crate::telegram::client::{Document, VideoDownloadInfo, VideoSource};
 /// range may start and end mid-block; the streaming code trims the excess bytes.
 const DOWNLOAD_CHUNK_SIZE: u64 = cache::BLOCK_SIZE;
 
+/// Blocks fetched ahead of the current one (a 2 MiB window) so seeks don't pay one
+/// Telegram round-trip per block.
+const PREFETCH_BLOCKS: u64 = 4;
+
 const URL_REQ_WHITELIST: &[&str] = &[
     "range",
     "accept",
@@ -319,7 +323,25 @@ fn telegram_cache_stream(
         let trim_suffix =
             (((last_block + 1) * DOWNLOAD_CHUNK_SIZE).min(total_size) - 1 - end) as usize;
 
+        // Blocks whose downloads were already kicked off ahead of the current one.
+        let mut prefetched_up_to = first_block;
+
         for block in first_block..=last_block {
+            // Prefetch the next few blocks while this one streams. `ensure` deduplicates
+            // (the first task downloads, the rest wait), so redundant spawns are cheap;
+            // a failing prefetch surfaces when the main loop reaches that block.
+            let window_end = (block + PREFETCH_BLOCKS).min(last_block);
+            while prefetched_up_to < window_end {
+                prefetched_up_to += 1;
+                let next = prefetched_up_to;
+                let (cache, source, doc) = (cache.clone(), source.clone(), document.clone());
+                tokio::spawn(async move {
+                    let _ = cache
+                        .ensure(next, async move { source.download_block(&doc, next).await })
+                        .await;
+                });
+            }
+
             let result = loop {
                 match cache.read_block(block).await {
                     Ok(Some(bytes)) => break Ok(bytes),

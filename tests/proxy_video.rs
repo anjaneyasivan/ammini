@@ -253,3 +253,41 @@ async fn head_request_has_no_body() {
     assert_eq!(res.bytes().await.unwrap().len(), 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn prefetch_downloads_future_blocks_in_parallel() {
+    // The request needs blocks 0-2, so blocks 1-4 are prefetched while 0 streams.
+    let total = 6 * BLOCK_SIZE;
+    let end = 3 * BLOCK_SIZE - 1;
+    let source = FakeSource {
+        delay: Some(Duration::from_millis(150)),
+        total_size: total,
+        ..Default::default()
+    };
+    let downloads = source.downloads.clone();
+    let (port, dir) = start_test_server(total, source).await;
+
+    let started = std::time::Instant::now();
+    let res = get_range(
+        &reqwest::Client::new(),
+        &proxy_url(port),
+        Some(&format!("bytes=0-{end}")),
+    )
+    .await;
+    assert_eq!(res.bytes().await.unwrap().len() as u64, end + 1);
+    let elapsed = started.elapsed();
+
+    // Sequential fetches of blocks 0-2 would need ~3 * 150 ms; prefetch overlaps them,
+    // so the whole request finishes in roughly one delay. The window is bounded by the
+    // request's last block, so exactly three blocks are fetched.
+    assert_eq!(
+        downloads.load(Ordering::SeqCst),
+        3,
+        "all three requested blocks should be fetched"
+    );
+    assert!(
+        elapsed < Duration::from_millis(350),
+        "fetch took {elapsed:?}, expected parallel downloads"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

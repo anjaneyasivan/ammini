@@ -207,6 +207,32 @@ pub async fn fetch_video_info(
     Ok(video)
 }
 
+/// The signed-in account's own bare user id, for marking own messages. Best effort:
+/// returns None when the session isn't authorized or the request fails (own messages
+/// then render as neutral until the next sign-in).
+pub async fn self_user_id(client: &TelegramClient) -> Option<i64> {
+    let request = grammers_client::tl::functions::users::GetUsers {
+        id: vec![grammers_client::tl::enums::InputUser::UserSelf],
+    };
+    match client.inner().invoke(&request).await.map(
+        |users: Vec<grammers_client::tl::enums::User>| {
+            users.into_iter().find_map(|user| match user {
+                grammers_client::tl::enums::User::User(u) => Some(u.id),
+                grammers_client::tl::enums::User::Empty(_) => None,
+            })
+        },
+    ) {
+        Ok(id) => {
+            tracing::debug!("tg: self user id = {id:?}");
+            id
+        }
+        Err(e) => {
+            tracing::warn!("tg: failed to fetch self user id: {e}");
+            None
+        }
+    }
+}
+
 /// Fetch the next page of dialogs from the iterator.
 /// Returns (dialogs, has_more).
 pub async fn next_dialogs_page(
@@ -245,6 +271,7 @@ pub async fn next_messages_page(
     iter: &mut MessageIter,
     page_size: usize,
     chat_id: i64,
+    self_user_id: Option<i64>,
 ) -> Result<(Vec<MessageInfo>, Vec<VideoDownloadInfo>, bool)> {
     let mut messages = Vec::with_capacity(page_size);
     let mut videos = Vec::new();
@@ -253,7 +280,7 @@ pub async fn next_messages_page(
     for _ in 0..page_size {
         match iter.next().await {
             Ok(Some(msg)) => {
-                let (info, video) = map_message(&msg, chat_id);
+                let (info, video) = map_message(&msg, chat_id, self_user_id);
                 messages.push(info);
                 if let Some(v) = video {
                     videos.push(v);
@@ -301,12 +328,18 @@ fn map_dialog(dialog: &grammers_client::peer::Dialog) -> DialogInfo {
 fn map_message(
     msg: &grammers_client::message::Message,
     chat_id: i64,
+    self_user_id: Option<i64>,
 ) -> (MessageInfo, Option<VideoDownloadInfo>) {
     let sender = msg
         .sender()
         .and_then(|p| p.name())
         .unwrap_or("")
         .to_string();
+    let sender_is_self = self_user_id.is_some_and(|uid| {
+        msg.sender()
+            .and_then(|p| p.id().bare_id())
+            .is_some_and(|sid| sid == uid)
+    });
     let text = msg.text().to_string();
     let time = format_datetime(&msg.date());
 
@@ -316,6 +349,7 @@ fn map_message(
         MessageInfo {
             id: msg.id(),
             sender,
+            sender_is_self,
             text,
             time,
             has_video,
@@ -406,7 +440,8 @@ pub async fn find_first_hevc_video(
             let mut messages_iter = client.iter_messages(peer);
             loop {
                 let (_, videos, has_more_messages) =
-                    next_messages_page(&mut messages_iter, MESSAGE_PAGE_SIZE, chat_id).await?;
+                    next_messages_page(&mut messages_iter, MESSAGE_PAGE_SIZE, chat_id, None)
+                        .await?;
                 if let Some(video) = videos.into_iter().find(is_hevc_video) {
                     return Ok(Some((peer, video)));
                 }
@@ -442,6 +477,8 @@ pub struct DialogInfo {
 pub struct MessageInfo {
     pub id: i32,
     pub sender: String,
+    /// Whether the message was sent by the signed-in account (for bubble styling).
+    pub sender_is_self: bool,
     pub text: String,
     pub time: String,
     pub has_video: bool,

@@ -119,6 +119,8 @@ async fn run_telegram(
     let mut dialogs_iter: Option<client::DialogIter> = None;
     let mut messages_iter: Option<client::MessageIter> = None;
     let mut selected_chat_id: Option<i64> = None;
+    // Own account id, for marking own messages (None until known).
+    let mut self_user_id: Option<i64> = None;
 
     let video_registry: Arc<tokio::sync::Mutex<HashMap<i32, client::VideoDownloadInfo>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
@@ -166,6 +168,7 @@ async fn run_telegram(
     match client.is_authorized().await {
         Ok(true) => {
             tracing::info!("telegram: already authorized");
+            self_user_id = client::self_user_id(&client).await;
             let _ = ui_tx.send(UiMessage::AuthSuccess);
             let mut iter = client.iter_dialogs();
             match client::next_dialogs_page(&mut iter, client::DIALOG_PAGE_SIZE).await {
@@ -219,6 +222,7 @@ async fn run_telegram(
                             "telegram: signed in (user {})",
                             user.id().bare_id_unchecked()
                         );
+                        self_user_id = Some(user.id().bare_id_unchecked());
                         let _ = ui_tx.send(UiMessage::AuthSuccess);
                         let mut iter = client.iter_dialogs();
                         match client::next_dialogs_page(&mut iter, client::DIALOG_PAGE_SIZE).await {
@@ -270,6 +274,7 @@ async fn run_telegram(
                 match client.check_password(pw_token, password).await {
                     Ok(user) => {
                         tracing::info!("telegram: 2FA ok (user {})", user.id().bare_id_unchecked());
+                        self_user_id = Some(user.id().bare_id_unchecked());
                         let _ = ui_tx.send(UiMessage::AuthSuccess);
                         let mut iter = client.iter_dialogs();
                         match client::next_dialogs_page(&mut iter, client::DIALOG_PAGE_SIZE).await {
@@ -339,8 +344,13 @@ async fn run_telegram(
                 video_cache.lock().await.clear();
 
                 let mut iter = client.iter_messages(peer_ref);
-                match client::next_messages_page(&mut iter, client::MESSAGE_PAGE_SIZE, chat_id)
-                    .await
+                match client::next_messages_page(
+                    &mut iter,
+                    client::MESSAGE_PAGE_SIZE,
+                    chat_id,
+                    self_user_id,
+                )
+                .await
                 {
                     Ok((messages, videos, has_more)) => {
                         messages_iter = Some(iter);
@@ -367,7 +377,13 @@ async fn run_telegram(
                     None => continue,
                 };
                 if let Some(iter) = messages_iter.as_mut() {
-                    match client::next_messages_page(iter, client::MESSAGE_PAGE_SIZE, chat_id).await
+                    match client::next_messages_page(
+                        iter,
+                        client::MESSAGE_PAGE_SIZE,
+                        chat_id,
+                        self_user_id,
+                    )
+                    .await
                     {
                         Ok((messages, videos, has_more)) => {
                             {

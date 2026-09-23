@@ -324,31 +324,95 @@ impl TelegramPanel {
                 }
                 ui.separator();
             }
-            for msg in &fsm.data.messages {
-                ui.horizontal(|ui| {
-                    if !msg.sender.is_empty() {
-                        ui.label(egui::RichText::new(&msg.sender).strong());
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(&msg.time).weak().small());
-                    });
-                });
-                if !msg.text.is_empty() {
-                    ui.label(&msg.text);
-                }
-                if msg.has_video {
-                    let is_loading =
-                        fsm.data.loading_video && fsm.data.current_video == Some(msg.id);
-                    if is_loading {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label("Loading video…");
+            let messages = &fsm.data.messages;
+            let dark = style::is_dark(ui.ctx());
+            for (i, msg) in messages.iter().enumerate() {
+                let is_me = msg.sender_is_self;
+                // Group consecutive messages from the same sender; show the sender and
+                // timestamp only at the start of a group.
+                let starts_group = i == 0
+                    || messages[i - 1].sender != msg.sender
+                    || messages[i - 1].sender_is_self != is_me;
+                if starts_group && !msg.sender.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(&msg.sender)
+                                .size(13.0)
+                                .color(style::text_secondary(dark)),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(&msg.time)
+                                    .size(12.0)
+                                    .color(style::text_secondary(dark)),
+                            );
                         });
-                    } else if ui.button(icon_label(ICON_PLAY_ARROW, "Play")).clicked() {
-                        clicked_msg_id = Some(msg.id);
-                    }
+                    });
+                    ui.add_space(4.0);
                 }
-                ui.separator();
+
+                let text = msg.text.trim();
+                if !text.is_empty() || msg.has_video {
+                    // Own messages: right-aligned accent bubble; others: neutral gray.
+                    let (fill, text_color) = if is_me {
+                        (style::ACCENT, egui::Color32::WHITE)
+                    } else {
+                        (style::bubble_other(dark), style::text_primary(dark))
+                    };
+                    let layout = if is_me {
+                        egui::Layout::right_to_left(egui::Align::TOP)
+                    } else {
+                        egui::Layout::left_to_right(egui::Align::TOP)
+                    };
+                    ui.with_layout(layout, |ui| {
+                        egui::Frame::new()
+                            .fill(fill)
+                            .corner_radius(egui::CornerRadius::same(style::BUBBLE_RADIUS))
+                            .inner_margin(egui::Margin::symmetric(12, 8))
+                            .show(ui, |ui| {
+                                ui.set_max_width(ui.available_width() * 0.65);
+                                if !text.is_empty() {
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(text).color(text_color),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
+                                if msg.has_video {
+                                    let is_loading = fsm.data.loading_video
+                                        && fsm.data.current_video == Some(msg.id);
+                                    if is_loading {
+                                        ui.horizontal(|ui| {
+                                            ui.spinner();
+                                            ui.label(
+                                                egui::RichText::new("Loading video…")
+                                                    .color(text_color),
+                                            );
+                                        });
+                                    } else if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new(String::from(ICON_PLAY_ARROW))
+                                                    .color(text_color),
+                                            )
+                                            .frame(false),
+                                        )
+                                        .on_hover_text("Play")
+                                        .clicked()
+                                    {
+                                        clicked_msg_id = Some(msg.id);
+                                    }
+                                }
+                            });
+                    });
+                }
+
+                // Tight spacing inside a group, breathing room between groups.
+                let next_same_group = messages
+                    .get(i + 1)
+                    .is_some_and(|n| n.sender == msg.sender && n.sender_is_self == is_me);
+                ui.add_space(if next_same_group { 4.0 } else { 12.0 });
             }
         });
 

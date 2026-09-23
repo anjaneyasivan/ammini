@@ -341,6 +341,7 @@ mod tests {
         MessageInfo {
             id,
             sender: String::new(),
+            sender_is_self: false,
             text: format!("msg {id}"),
             time: String::new(),
             has_video: false,

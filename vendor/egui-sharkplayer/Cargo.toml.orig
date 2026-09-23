@@ -1,0 +1,100 @@
+[workspace]
+resolver = "3"
+members = ["examples/simple", "examples/simple-wgpu"]
+
+[workspace.dependencies]
+egui-file-dialog = "0.14"
+
+[workspace.lints.rust]
+explicit_outlives_requirements = "warn"
+trivial_casts = "warn"
+
+unexpected_cfgs = "deny"
+unknown_lints = "deny"
+rust_2018_idioms               = { level = "deny", priority = -1 }
+rust_2021_compatibility        = { level = "deny", priority = -1 }
+rust_2024_compatibility        = { level = "deny", priority = -1 }
+trivial_numeric_casts = "deny"
+
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+struct_excessive_bools = "allow" # This lint is stupid
+too_many_lines = "allow"
+too_many_arguments = "allow"
+len_without_is_empty = "allow"
+arithmetic_side_effects = "allow"
+
+allow_attributes = "warn"
+branches_sharing_code = "warn"
+bool_to_int_with_if = "warn"
+# cargo_common_metadata = "warn"
+checked_conversions = "warn"
+clone_on_ref_ptr = "warn"
+collapsible_else_if = "warn"
+comparison_chain = "warn"
+create_dir = "warn"
+cast_possible_wrap = "warn"
+decimal_bitwise_operands = "warn"
+doc_comment_double_space_linebreaks = "warn"
+doc_paragraphs_missing_punctuation = "warn"
+filetype_is_file = "warn"
+get_unwrap = "warn"
+if_not_else = "warn"
+manual_is_power_of_two = "warn"
+manual_is_variant_and = "warn"
+manual_let_else = "warn"
+manual_midpoint = "warn"
+manual_string_new = "warn"
+match_bool = "warn"
+match_same_arms = "warn"
+rc_buffer = "warn"
+return_self_not_must_use = "warn"
+
+copy_iterator = "deny"
+dbg_macro = "deny"
+debug_assert_with_mut_call = "deny"
+doc_broken_link = "deny"
+field_scoped_visibility_modifiers = "deny"
+iter_with_drain = "deny"
+missing_fields_in_debug = "deny"
+or_fun_call = "deny"
+
+[package]
+name = "egui-sharkplayer"
+version = "0.5.1"
+edition = "2024"
+rust-version = "1.92.0"
+license = "Unlicense"
+authors = ["sharkyshark"]
+description = "A hardware accelerated video player for egui using libmpv"
+repository = "https://codeberg.org/sharkyshark/egui-sharkplayer"
+keywords = ["video-player", "egui", "eframe", "libmpv2"]
+
+
+[dependencies]
+eframe = { version = "0.35", default-features = false, features = ["glow"] }
+# egui = "0.34"
+libmpv2 = "6.0"
+thiserror = "2"
+tracing = "0.1"
+
+khronos-egl = { version = "6", features = ["dynamic"], optional = true }
+libloading = { version = "0.8", optional = true }
+glow = { version = "0.17.0", optional = true }
+
+
+[features]
+default = ["wayland", "x11"]
+
+wayland = ["eframe/wayland"]
+x11 = ["eframe/x11"]
+
+wgpu = ["eframe/wgpu", "dep:glow", "dep:khronos-egl", "dep:libloading"]
+
+[dev-dependencies]
+eframe = { version = "0.35", default-features = false, features = ["default_fonts"] }
+
+[lints]
+workspace = true
+

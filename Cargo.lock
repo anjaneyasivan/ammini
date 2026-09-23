@@ -814,8 +814,6 @@ dependencies = [
 [[package]]
 name = "egui-sharkplayer"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9215c88181320b5c8c5e1bc3d7515a8df8f2ef72ce1583b31a49c5f777098f7"
 dependencies = [
  "eframe",
  "libmpv2",
@@ -2126,6 +2124,7 @@ dependencies = [
  "egui_material_icons",
  "grammers-client",
  "grammers-session",
+ "libmpv2",
  "reqwest",
  "rfd",
  "serde",

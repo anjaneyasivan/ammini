@@ -2,7 +2,7 @@ use eframe::{App, Frame, NativeOptions, egui};
 use egui_material_icons::icons::*;
 use egui_sharkplayer::{PlayerState, SharkPlayer};
 use min_mpv::fonts::icon_label;
-use min_mpv::fsm::{PersistentState, PlayerEvent, PlayerFsm};
+use min_mpv::fsm::{PersistentState, PlayerEvent, PlayerFsm, audio_track_label};
 use min_mpv::telegram::config::TelegramConfig;
 use min_mpv::telegram::panel::TelegramPanel;
 use min_mpv::telegram::state_machine::{TelegramEvent, TelegramFsm};
@@ -57,6 +57,14 @@ impl egui_sharkplayer::ControlsIconProvider for PlayerControlIcons {
     }
 }
 
+/// An audio track discovered via mpv's scalar `track-list/N/*` sub-properties.
+#[derive(Clone)]
+struct AudioTrack {
+    id: i64,
+    label: String,
+    selected: bool,
+}
+
 struct MinMpvApp {
     fsm: StateMachine<PlayerFsm>,
     url_input: String,
@@ -69,6 +77,10 @@ struct MinMpvApp {
     /// egui id of the video surface, captured each frame so global shortcuts don't
     /// double-handle keys the SharkPlayer widget already owns while focused.
     video_focus_id: Option<egui::Id>,
+    /// Audio tracks of the currently loaded media (empty until media is loaded).
+    audio_tracks: Vec<AudioTrack>,
+    /// Last seen `track-list/count`, so the list is only rebuilt when it changes.
+    audio_track_count: i64,
 }
 
 impl MinMpvApp {
@@ -129,6 +141,8 @@ impl MinMpvApp {
             bg_tx,
             ui_rx,
             video_focus_id: None,
+            audio_tracks: Vec::new(),
+            audio_track_count: 0,
         };
         app.fsm.init();
         info!("app initialized");
@@ -310,8 +324,70 @@ impl MinMpvApp {
         }
     }
 
+    /// Refresh the audio track list from mpv. Only the scalar `track-list/N/*`
+    /// sub-properties are read (libmpv2 cannot read the `track-list` node itself);
+    /// the full list is rebuilt only when the track count changes, so steady-state
+    /// costs one property read per frame. Called every frame before the top bar.
+    fn refresh_audio_tracks(&mut self) {
+        let loaded = matches!(self.player_mut().duration(), Ok(Some(_)));
+        if !loaded {
+            if !self.audio_tracks.is_empty() || self.audio_track_count != 0 {
+                self.audio_tracks.clear();
+                self.audio_track_count = 0;
+            }
+            return;
+        }
+
+        let mut tracks = Vec::new();
+        let count = {
+            let mpv = self.player_mut().mpv();
+            let count = mpv.get_property("track-list/count").unwrap_or(0);
+            for i in 0..count {
+                let Ok(kind) = mpv.get_property::<String>(&format!("track-list/{i}/type")) else {
+                    continue;
+                };
+                if kind != "audio" {
+                    continue;
+                }
+                let track = AudioTrack {
+                    id: mpv
+                        .get_property::<i64>(&format!("track-list/{i}/id"))
+                        .unwrap_or(i),
+                    label: audio_track_label(
+                        mpv.get_property::<String>(&format!("track-list/{i}/title"))
+                            .ok()
+                            .filter(|s| !s.is_empty()),
+                        mpv.get_property::<String>(&format!("track-list/{i}/lang"))
+                            .ok()
+                            .filter(|s| !s.is_empty()),
+                        tracks.len(),
+                    ),
+                    selected: mpv
+                        .get_property::<bool>(&format!("track-list/{i}/selected"))
+                        .unwrap_or(false),
+                };
+                tracks.push(track);
+            }
+            count
+        };
+
+        if count == self.audio_track_count && !tracks.is_empty() {
+            return;
+        }
+        self.audio_track_count = count;
+        self.audio_tracks = tracks;
+        tracing::debug!(
+            "audio tracks: {:?}",
+            self.audio_tracks
+                .iter()
+                .map(|t| (t.id, t.label.clone(), t.selected))
+                .collect::<Vec<_>>()
+        );
+    }
+
     fn top_bar(&mut self, ui: &mut egui::Ui, events: &mut Vec<PlayerEvent>) {
         let mut clear_resume = false;
+        let mut chosen_aid: Option<i64> = None;
         ui.horizontal(|ui| {
             if ui.button(icon_label(ICON_FILE_OPEN, "Open File")).clicked()
                 && let Some(e) = self.open_file_dialog()
@@ -343,6 +419,35 @@ impl MinMpvApp {
             }
             if ui.button(icon_label(ICON_SEND, "Telegram")).clicked() {
                 self.show_telegram = !self.show_telegram;
+            }
+
+            // Audio track switcher: disabled until mpv reports any audio tracks.
+            let current_label = self
+                .audio_tracks
+                .iter()
+                .find(|t| t.selected)
+                .map(|t| t.label.clone())
+                .unwrap_or_else(|| "Audio".to_string());
+            let tracks = self.audio_tracks.clone();
+            ui.add_enabled_ui(!tracks.is_empty(), |ui| {
+                ui.menu_button(icon_label(ICON_AUDIOTRACK, &current_label), |ui| {
+                    for track in &tracks {
+                        if ui.selectable_label(track.selected, &track.label).clicked() {
+                            chosen_aid = Some(track.id);
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            if let Some(id) = chosen_aid {
+                match self.player_mut().mpv().set_property("aid", id) {
+                    Ok(()) => {
+                        for track in &mut self.audio_tracks {
+                            track.selected = track.id == id;
+                        }
+                    }
+                    Err(e) => tracing::warn!("failed to switch audio track to {id}: {e}"),
+                }
             }
 
             ui.menu_button(icon_label(ICON_HISTORY, "Recent"), |ui| {
@@ -420,6 +525,7 @@ impl App for MinMpvApp {
         self.handle_dropped_files(&ctx, &mut events);
         self.handle_shortcuts(&ctx, &mut events);
         self.handle_url_dialog(ui, &mut events);
+        self.refresh_audio_tracks();
 
         egui::Panel::top("top_bar").show(ui, |ui| {
             self.top_bar(ui, &mut events);

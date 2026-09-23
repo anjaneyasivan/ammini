@@ -9,6 +9,9 @@ Telegram account.
 
 - Open individual files or whole folders of videos; drag-and-drop works too.
 - Playlist side panel with click-to-play and prev/next navigation.
+- **Audio-track switcher**: the top-bar `Audio` dropdown lists the current file's audio
+  streams (title/language), with the active one checked; picking another switches mpv
+  to it.
 - **Persistent state across restarts**: recent files, the current playlist and track,
   volume, and per-file resume positions (local files only).
 - Telegram sidebar (`Cmd+T`): phone/2FA sign-in, chat list, message list with video

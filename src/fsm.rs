@@ -300,3 +300,42 @@ fn is_loaded(player: &PlayerState) -> bool {
 fn is_paused(player: &PlayerState) -> bool {
     player.paused().unwrap_or(true)
 }
+
+/// Human label for an audio track: title, else language, else "Track {n}". When both
+/// title and language exist, the language is only appended if the title doesn't already
+/// mention it.
+pub fn audio_track_label(title: Option<String>, lang: Option<String>, index: usize) -> String {
+    match (title, lang) {
+        (Some(t), Some(l)) if !t.to_lowercase().contains(&l.to_lowercase()) => format!("{t} ({l})"),
+        (Some(t), _) => t,
+        (None, Some(l)) => l,
+        (None, None) => format!("Track {}", index + 1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::audio_track_label;
+
+    #[test]
+    fn audio_track_label_prefers_title() {
+        assert_eq!(
+            audio_track_label(Some("Commentary".into()), Some("de".into()), 0),
+            "Commentary (de)"
+        );
+        assert_eq!(
+            audio_track_label(Some("English".into()), Some("English".into()), 1),
+            "English"
+        );
+        assert_eq!(
+            audio_track_label(Some("Directors Cut".into()), None, 2),
+            "Directors Cut"
+        );
+    }
+
+    #[test]
+    fn audio_track_label_falls_back_to_lang_and_index() {
+        assert_eq!(audio_track_label(None, Some("ja".into()), 3), "ja");
+        assert_eq!(audio_track_label(None, None, 4), "Track 5");
+    }
+}

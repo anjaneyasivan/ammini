@@ -23,6 +23,9 @@ Telegram account.
   watched videos are cached (512 KiB blocks), reused across restarts, prefetched ahead
   of the playhead, and garbage-collected (30-day age / 2 GiB budget).
 - Material Design icons on all buttons, Material icons for the on-video control bar.
+- **Native-feeling macOS UI**: Inter font, system light/dark appearance, chat list
+  cards with avatar circles, and iMessage-style message bubbles (right-aligned accent
+  for your own messages, grouped by sender with timestamps at group starts).
 - mpv's own overlay controls inside the video area (play/pause, seek, volume, fullscreen).
 
 ## Requirements

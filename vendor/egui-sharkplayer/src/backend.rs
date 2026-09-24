@@ -539,7 +539,10 @@ impl PlayerState {
     /// An `Err(_)` is returned in the event of a [`BackendError`].
     pub fn seek_relative(&self, seconds: f64) -> Result<(), BackendError> {
         let seconds = seconds.to_string();
-        self.mpv.mpv.command("seek", &[&seconds, "relative+exact"])?;
+        // Ammini: keyframe seek (no `exact`) so 10 s arrow/skip seeks land fast, the
+        // way mpv CLI / VLC behave; frame-exact seeks decode up to the target frame
+        // every press and feel laggy over the streamed Telegram proxy.
+        self.mpv.mpv.command("seek", &[&seconds, "relative"])?;
         trace!("Seeked {seconds:.3}.");
         Ok(())
     }

@@ -1,6 +1,7 @@
 use ammini::fonts::icon_label;
 use ammini::fsm::{
-    PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, record_recent_telegram, track_label,
+    FsmState, PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, record_recent_telegram,
+    track_label,
 };
 use ammini::telegram::config::TelegramConfig;
 use ammini::telegram::panel::TelegramPanel;
@@ -13,6 +14,7 @@ use egui_sharkplayer::{PlayerState, SharkPlayer};
 use rfd::FileDialog;
 use statig::blocking::StateMachine;
 use statig::prelude::*;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -108,6 +110,18 @@ struct AmminiApp {
     /// Keeps the macOS display awake while media is actually playing (released on
     /// pause); no-op on other platforms.
     display_sleep: ammini::display_sleep::Guard,
+    /// Per-message disk-cache coverage of Telegram videos (msg_id → total bytes +
+    /// cached byte ranges), refreshed once per second by the bg thread so the
+    /// seekbar can shade the cached parts.
+    cache_coverage: HashMap<i32, CacheCoverage>,
+}
+
+/// Byte coverage of a Telegram video's disk block cache as published by the bg
+/// thread (see `UiMessage::CacheCoverage`).
+#[derive(Clone, Default)]
+struct CacheCoverage {
+    total_bytes: u64,
+    ranges: Vec<(u64, u64)>,
 }
 
 impl AmminiApp {
@@ -176,6 +190,7 @@ impl AmminiApp {
             subtitle_track_count: 0,
             pending_seek: Arc::new(std::sync::Mutex::new(None)),
             display_sleep: ammini::display_sleep::Guard::new(),
+            cache_coverage: HashMap::new(),
         };
         app.fsm.init();
         info!("app initialized");
@@ -397,6 +412,47 @@ impl AmminiApp {
         let playing = !self.player_mut().paused().unwrap_or(true)
             && matches!(self.player_mut().duration(), Ok(Some(_)));
         self.display_sleep.set_playing(playing);
+    }
+
+    /// True while the player FSM is still in its `loading` state for a Telegram
+    /// video — the file's initial fetch hasn't produced playable media yet. Drives
+    /// the loading overlay over the video; local files load too fast to matter.
+    fn telegram_load_in_progress(&self) -> bool {
+        if !matches!(self.fsm.state(), FsmState::Loading { .. }) {
+            return false;
+        }
+        self.fsm
+            .playlist
+            .get(self.fsm.current_index.unwrap_or(0))
+            .is_some_and(|p| ammini::telegram::telegram_url_msg_id(p).is_some())
+    }
+
+    /// Time spans (seconds) of the currently playing path that are already in the
+    /// Telegram disk cache, for shading on the seekbar. Empty for non-Telegram paths,
+    /// unknown coverage, or before playback reports a duration.
+    fn current_cache_spans(&mut self) -> Vec<(f64, f64)> {
+        let Some(path) = self
+            .fsm
+            .playlist
+            .get(self.fsm.current_index.unwrap_or(0))
+            .cloned()
+        else {
+            return Vec::new();
+        };
+        let Some(msg_id) = ammini::telegram::telegram_url_msg_id(&path) else {
+            return Vec::new();
+        };
+        // Clone the (small) coverage out so the mutable player borrow below doesn't
+        // overlap the immutable cache map borrow.
+        let Some((total_bytes, ranges)) = self
+            .cache_coverage
+            .get(&msg_id)
+            .map(|c| (c.total_bytes, c.ranges.clone()))
+        else {
+            return Vec::new();
+        };
+        let duration = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
+        ammini::telegram::cache::byte_ranges_to_time_spans(&ranges, total_bytes, duration)
     }
 
     /// Refresh the audio and subtitle track lists from mpv. Only the scalar
@@ -664,7 +720,10 @@ impl App for AmminiApp {
         let mut events = Vec::new();
 
         while let Ok(msg) = self.ui_rx.try_recv() {
-            debug!("telegram ui message: {msg:?}");
+            // Full-message dumps are too noisy: `DialogsPageLoaded`/`MessagesPageLoaded`
+            // carry whole lists and `CacheCoverage` fires once a second. The per-message
+            // counts below keep the loop diagnosable instead.
+            // debug!("telegram ui message: {msg:?}");
             match msg {
                 UiMessage::ProxyReady { port } => {
                     let url = format!("http://127.0.0.1:{port}");
@@ -702,6 +761,19 @@ impl App for AmminiApp {
                         message: e.clone(),
                     });
                     self.telegram_fsm.handle(&TelegramEvent::VideoError(e));
+                }
+                UiMessage::CacheCoverage {
+                    msg_id,
+                    total_bytes,
+                    ranges,
+                } => {
+                    self.cache_coverage.insert(
+                        msg_id,
+                        CacheCoverage {
+                            total_bytes,
+                            ranges,
+                        },
+                    );
                 }
                 other => {
                     // Central error/telegram-auth reporting: every background error
@@ -772,17 +844,48 @@ impl App for AmminiApp {
         self.update_display_sleep();
 
         egui::CentralPanel::default().show(ui, |ui| {
+            // Cached byte ranges of the current Telegram video, shaded on the
+            // seekbar lighter than the rail (theme-derived; empty for local files).
+            let cache_spans = self.current_cache_spans();
+            let cache_color = ammini::style::cache_bar_fill(ui.visuals().widgets.inactive.bg_fill);
             let pending = self.pending_seek.clone();
             let player_response = ui.add(
-                SharkPlayer::new_with_icons(self.player_mut(), PlayerControlIcons).seek_callback(
-                    Rc::new(move |_forward, target| {
+                SharkPlayer::new_with_icons(self.player_mut(), PlayerControlIcons)
+                    .seek_callback(Rc::new(move |_forward, target| {
                         // Arrow keys / J / L / skip buttons — records the seek so the
                         // next frames' `poll_seek` can time when playback resumes.
                         *pending.lock().unwrap() = Some(SeekTracker::new(target, _forward));
-                    }),
-                ),
+                    }))
+                    .cache_overlay(cache_spans, cache_color),
             );
             self.video_focus_id = Some(player_response.id);
+
+            // Loading overlay: dim the video and show a spinner while a Telegram
+            // file's initial load is still in progress (painted, not a widget, so
+            // it never steals clicks from the video surface).
+            if self.telegram_load_in_progress() {
+                let video_rect = player_response.rect;
+                let painter = ui.painter().with_clip_rect(video_rect);
+                painter.rect_filled(video_rect, 0.0, egui::Color32::from_black_alpha(70));
+
+                let spinner_size = 40.0;
+                let spinner_rect = egui::Rect::from_center_size(
+                    video_rect.center(),
+                    egui::Vec2::splat(spinner_size),
+                );
+                egui::Spinner::new()
+                    .size(spinner_size)
+                    .paint_at(ui, spinner_rect);
+
+                let font_id = egui::TextStyle::Body.resolve(ui.style());
+                painter.text(
+                    egui::pos2(video_rect.center().x, spinner_rect.max.y + 12.0),
+                    egui::Align2::CENTER_TOP,
+                    "Loading…",
+                    font_id,
+                    ui.visuals().weak_text_color(),
+                );
+            }
         });
     }
 

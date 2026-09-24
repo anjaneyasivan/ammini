@@ -27,7 +27,10 @@ Telegram account.
   data).
 - Telegram videos stream through a local HTTP proxy backed by a **disk block cache** —
   watched videos are cached (512 KiB blocks), reused across restarts, prefetched ahead
-  of the playhead, and garbage-collected (30-day age / 2 GiB budget).
+  of the playhead, and garbage-collected (30-day age / 2 GiB budget). The part of the
+  seekbar already in the cache is shaded lighter than the track (approximate for VBR
+  videos, since the cache maps bytes, not time), and a dimmed **loading spinner**
+  overlays the video while a Telegram file's initial load is in progress.
 - Material Design icons on all buttons, Material icons for the on-video control bar.
 - **Native-feeling macOS UI**: Inter font, system light/dark appearance, chat list
   cards with avatar circles, and iMessage-style message bubbles (right-aligned accent
@@ -121,6 +124,10 @@ Worth knowing:
   containing them.
 - Homebrew's mpv/ffmpeg are GPL-licensed; redistributing the bundled libraries carries
   licence obligations, so the script is aimed at personal builds.
+- The bundle only runs on the macOS it was built on or newer — Homebrew builds its dylibs
+  against the build machine — so build the DMG on the oldest macOS you need to support
+  (`MIN_MACOS=15.5 scripts/bundle-macos.sh` declares the target; see BUILDING.md →
+  "Supported macOS versions").
 
 ## Shortcuts
 

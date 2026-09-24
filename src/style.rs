@@ -58,6 +58,13 @@ pub fn selected_fill() -> Color32 {
     ACCENT.linear_multiply(0.20)
 }
 
+/// Seekbar "cached" indicator fill: a lighter shade of the current rail background,
+/// so cached spans read as "available" without clashing with the played fill. Derived
+/// from the rail instead of the mode so both light and dark themes stay correct.
+pub fn cache_bar_fill(rail_bg: Color32) -> Color32 {
+    rail_bg.lerp_to_gamma(Color32::WHITE, 0.35)
+}
+
 /// Primary text color for both modes (near-black/near-white, never pure).
 pub fn text_primary(dark: bool) -> Color32 {
     if dark {

@@ -8,6 +8,7 @@ pub mod state_machine;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 pub use client::{DialogInfo, MessageInfo, PeerRef};
@@ -47,6 +48,16 @@ pub enum UiMessage {
     },
     VideoError(String),
     Error(String),
+    /// Published once per second by a background task while a Telegram video is
+    /// cached: the byte ranges of `msg_id` that are present in the disk block cache,
+    /// so the UI can shade those parts of the seekbar. One message per cached video.
+    CacheCoverage {
+        msg_id: i32,
+        /// Total size of the video in bytes.
+        total_bytes: u64,
+        /// Contiguous cached byte ranges `[start, end)`.
+        ranges: Vec<(u64, u64)>,
+    },
 }
 
 /// Commands sent from the UI to the background thread.
@@ -164,6 +175,35 @@ async fn run_telegram(
             return;
         }
     };
+
+    // Publish disk-cache coverage of any Telegram videos being streamed (usually the
+    // current one) once per second, so the UI can shade those parts of the seekbar.
+    // Runs for the whole session; skipped ticks never burst (missed ticks are
+    // dropped), and it ends the moment the UI channel is dropped.
+    {
+        let coverage_tx = ui_tx.clone();
+        let coverage_cache = video_cache.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(1));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tick.tick().await;
+                let caches = coverage_cache.lock().await;
+                for (msg_id, cache) in caches.iter() {
+                    if coverage_tx
+                        .send(UiMessage::CacheCoverage {
+                            msg_id: *msg_id,
+                            total_bytes: cache.total_size(),
+                            ranges: cache.cached_byte_ranges(),
+                        })
+                        .is_err()
+                    {
+                        return; // UI is gone
+                    }
+                }
+            }
+        });
+    }
 
     match client.is_authorized().await {
         Ok(true) => {
@@ -542,5 +582,39 @@ fn video_meta(document: &client::Document) -> crate::telemetry::VideoMeta {
         width,
         height,
         mime: document.mime_type().map(str::to_owned),
+    }
+}
+
+/// The message id from a `/telegram/{msg_id}` proxy URL, or `None` when the path is
+/// not a Telegram video URL. Used to look up the seekbar's cached-range coverage for
+/// the currently playing path.
+pub fn telegram_url_msg_id(url: &str) -> Option<i32> {
+    let rest = url.split_once("/telegram/")?.1;
+    rest.split('/').next()?.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::telegram::telegram_url_msg_id;
+
+    #[test]
+    fn telegram_url_msg_id_parses_proxy_url() {
+        assert_eq!(
+            telegram_url_msg_id("http://127.0.0.1:51482/telegram/12345"),
+            Some(12345)
+        );
+    }
+
+    #[test]
+    fn telegram_url_msg_id_rejects_other_paths() {
+        assert_eq!(
+            telegram_url_msg_id("http://127.0.0.1:51482/url?url=http://example.com"),
+            None
+        );
+        assert_eq!(telegram_url_msg_id("/Users/x/movie.mp4"), None);
+        assert_eq!(
+            telegram_url_msg_id("http://127.0.0.1:51482/telegram/notnum"),
+            None
+        );
     }
 }

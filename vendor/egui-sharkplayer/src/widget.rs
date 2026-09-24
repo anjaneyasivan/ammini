@@ -176,6 +176,9 @@ struct UiState {
     dragged_volume:          Option<f64>,
     fullscreen:              bool,
     requested_initial_focus: bool,
+    /// Last valid playback position; fallback while mpv reports `time-pos`
+    /// unavailable (e.g. mid-seek), so the label never flashes a bogus `00:00`.
+    last_time_pos:           f64,
 }
 
 /// The video player widget. This is what actually get's created in the `ui`
@@ -198,6 +201,10 @@ pub struct SharkPlayer<'a, P: ControlsIconProvider = DefaultControlsIconProvider
     // measure seek latency. `true` = forward, second arg = the widget-side
     // predicted target position after the skip.
     seek_callback:      Option<Rc<dyn Fn(bool, f64)>>,
+    // Ammini patch #4: cached byte-range coverage (video time in seconds) shaded
+    // lighter than the rail, plus the fill color (theme-derived by the app).
+    cache_spans:        Vec<(f64, f64)>,
+    cache_color:        Color32,
 }
 
 impl<'a> SharkPlayer<'a> {
@@ -229,6 +236,8 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
                 error!("{e}");
             }),
             seek_callback: None,
+            cache_spans: Vec::new(),
+            cache_color: Color32::TRANSPARENT,
         }
     }
 
@@ -294,6 +303,16 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
     #[inline]
     pub fn seek_callback(mut self, f: Rc<dyn Fn(bool, f64)>) -> Self {
         self.seek_callback = Some(f);
+        self
+    }
+
+    /// Shade the given time spans (video seconds) as cached on the seekbar, using
+    /// `color` — the app derives a lighter variant of the rail background so both
+    /// light and dark themes stay correct.
+    #[inline]
+    pub fn cache_overlay(mut self, spans: Vec<(f64, f64)>, color: Color32) -> Self {
+        self.cache_spans = spans;
+        self.cache_color = color;
         self
     }
 
@@ -648,47 +667,133 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
 
     fn seekbar(&self, ui: &mut egui::Ui, ui_state: &mut UiState, current_time: &mut f64, duration: f64) {
         ui.spacing_mut().slider_width = ui.available_width();
-        let seekbar = ui.add(
-            egui::Slider::new(current_time, 0.0..=duration)
-                .show_value(false)
-                .trailing_fill(true),
+
+        // Ammini patch #4: the seekbar is painted manually instead of via egui's
+        // Slider so cached ranges can be shaded between the rail and the played
+        // fill. Geometry mirrors egui's slider (rail centered in an interact-sized
+        // allocation, handle radius = height/2.5, position shrunk by the handle),
+        // and the drag/click seek + hover tooltip behave exactly as the slider did.
+        let thickness = ui
+            .text_style_height(&egui::TextStyle::Body)
+            .max(ui.spacing().interact_size.y);
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(ui.spacing().slider_width, thickness),
+            egui::Sense::click_and_drag(),
         );
-        let slider_rect = seekbar.rect;
 
-        if seekbar.dragged() {
-            ui_state.dragged_time = Some(*current_time);
+        if !ui.is_rect_visible(rect) {
+            return;
         }
-        if seekbar.drag_stopped() || (seekbar.changed() && !seekbar.dragged()) {
-            if let Err(e) = self.backend.seek_to(*current_time) {
-                (self.on_error)(Error::new(e, ErrorCause::Seek(*current_time)));
+
+        let visuals = ui.style().interact(&response);
+        let widget_visuals = &ui.visuals().widgets;
+        let spacing = &ui.style().spacing;
+        let rail_radius = (spacing.slider_rail_height / 2.0).max(0.0);
+        let rail_rect = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), rect.center().y - rail_radius),
+            egui::pos2(rect.right(), rect.center().y + rail_radius),
+        );
+        let corner_radius = widget_visuals.inactive.corner_radius;
+        let painter = ui.painter();
+        let handle_radius = rect.height() / 2.5;
+        let position_range = rect.x_range().shrink(handle_radius);
+
+        // Track background.
+        painter.rect_filled(rail_rect, corner_radius, widget_visuals.inactive.bg_fill);
+
+        if duration > 0.0 {
+            let to_x = |seconds: f64| {
+                position_range.min + (seconds / duration).clamp(0.0, 1.0) as f32 * position_range.span()
+            };
+
+            // Ammini patch #4: cached ranges, a lighter shade than the rail, painted
+            // under the played fill so the full cached extent reads even behind the
+            // playhead.
+            for &(start, end) in &self.cache_spans {
+                let x0 = to_x(start);
+                let x1 = to_x(end);
+                if x1 > x0 {
+                    painter.rect_filled(
+                        egui::Rect::from_min_max(
+                            egui::pos2(x0, rail_rect.top()),
+                            egui::pos2(x1, rail_rect.bottom()),
+                        ),
+                        corner_radius,
+                        self.cache_color,
+                    );
+                }
             }
-            ui_state.dragged_time = None;
-        }
 
-        // Display a tooltip informing the user where a click would seek to.
-        if let Some(ppos) = ui.ctx().pointer_latest_pos()
-            && (slider_rect.contains(ppos) || seekbar.dragged())
-        {
-            let prev_time =
-                f64::from(((ppos.x - slider_rect.min.x) / slider_rect.width()).clamp(0., 1.)) * duration;
-            egui::Tooltip::always_open(
-                ui.ctx().clone(),
-                ui.layer_id(),
-                ui.id(),
-                egui::PopupAnchor::Pointer,
-            )
-            .show(|ui| {
-                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin::same(6))
-                    .show(ui, |ui| {
-                        if duration >= HOUR {
-                            ui.label(Self::format_time_hh_mm_ss(prev_time));
-                        } else {
-                            ui.label(Self::format_time_mm_ss(prev_time));
-                        }
-                    })
-            });
+            // Played portion, clamped to the handle (mirrors the slider's
+            // `trailing_fill`).
+            let center = egui::pos2(to_x(*current_time), rail_rect.center().y);
+            let mut trailing_rail_rect = rail_rect;
+            trailing_rail_rect.max.x = center.x + f32::from(corner_radius.nw);
+            painter.rect_filled(trailing_rail_rect, corner_radius, ui.visuals().selection.bg_fill);
+
+            // Handle.
+            let radius = handle_radius + visuals.expansion;
+            painter.circle_filled(center, radius, visuals.bg_fill);
+            painter.circle_stroke(center, radius, visuals.fg_stroke);
+
+            // Drag/click to seek. Mirrors the slider this replaces: while the
+            // pointer is down the widget previews the target live (persisting it
+            // across frames only while actually dragging), a press without movement
+            // seeks immediately (click-to-seek), and a drag seeks on release. Every
+            // gesture clears the preview, so the seekbar can never be left stuck on
+            // a stale time — a stuck `dragged_time` would freeze the seekbar and
+            // time label (arrows still seek the video, but the bar wouldn't move).
+            if let Some(ppos) = response.interact_pointer_pos() {
+                let t = ((ppos.x - position_range.min) / position_range.span()).clamp(0.0, 1.0);
+                let target = f64::from(t) * duration;
+                let changed = (*current_time - target).abs() > 1e-9;
+                *current_time = target;
+                if response.dragged() {
+                    ui_state.dragged_time = Some(target);
+                } else if changed {
+                    // Press without movement: click-to-seek on press, like the slider.
+                    if let Err(e) = self.backend.seek_to(target) {
+                        (self.on_error)(Error::new(e, ErrorCause::Seek(target)));
+                    }
+                }
+            }
+            if response.drag_stopped() {
+                if let Err(e) = self.backend.seek_to(*current_time) {
+                    (self.on_error)(Error::new(e, ErrorCause::Seek(*current_time)));
+                }
+                ui_state.dragged_time = None;
+            } else if response.clicked() {
+                // Release of a plain click — the press already sought. Just make sure
+                // the preview is cleared (e.g. a click that landed exactly on the
+                // playhead never sought, so nothing else would clear it).
+                ui_state.dragged_time = None;
+            }
+
+            // Display a tooltip informing the user where a click would seek to.
+            if let Some(ppos) = ui.ctx().pointer_latest_pos()
+                && (rect.contains(ppos) || response.dragged())
+            {
+                let prev_time =
+                    f64::from(((ppos.x - rect.min.x) / rect.width()).clamp(0., 1.)) * duration;
+                egui::Tooltip::always_open(
+                    ui.ctx().clone(),
+                    ui.layer_id(),
+                    ui.id(),
+                    egui::PopupAnchor::Pointer,
+                )
+                .show(|ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin::same(6))
+                        .show(ui, |ui| {
+                            if duration >= HOUR {
+                                ui.label(Self::format_time_hh_mm_ss(prev_time));
+                            } else {
+                                ui.label(Self::format_time_mm_ss(prev_time));
+                            }
+                        })
+                });
+            }
         }
     }
 
@@ -757,10 +862,23 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
 
         self.player_ui(ui, rect);
 
-        let mut current_time = ui_state
-            .dragged_time
-            .unwrap_or_else(|| self.backend.time_pos().ok().flatten().unwrap_or(0.0));
-        let duration = self.backend.duration().ok().flatten().unwrap_or(0.0);
+        let live_time = self.backend.time_pos().ok().flatten();
+        let live_duration = self.backend.duration().ok().flatten();
+        // A new file is loading while its duration isn't known yet (mpv exposes it
+        // once the file parses); forget the previous file's position so the label
+        // doesn't fall back to a stale value while the new file's time-pos is
+        // unavailable.
+        if live_duration.is_none() && ui_state.dragged_time.is_none() {
+            ui_state.last_time_pos = 0.0;
+        }
+        if let Some(position) = live_time {
+            ui_state.last_time_pos = position;
+        }
+        let mut current_time =
+            ui_state
+                .dragged_time
+                .unwrap_or(live_time.unwrap_or(ui_state.last_time_pos));
+        let duration = live_duration.unwrap_or(0.0);
         self.handle_keybinds(
             ui,
             &player_response,

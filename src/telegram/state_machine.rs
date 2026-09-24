@@ -343,6 +343,10 @@ pub fn ui_message_to_event(msg: &crate::telegram::UiMessage) -> Option<TelegramE
             // The UI uses the proxy port directly; no state change needed.
             return None;
         }
+        UiMessage::CacheCoverage { .. } => {
+            // Seekbar cache-coverage shading; no state change needed.
+            return None;
+        }
     })
 }
 

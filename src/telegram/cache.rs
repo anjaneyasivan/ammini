@@ -49,6 +49,26 @@ pub fn blocks_between(start: u64, end: u64) -> std::ops::RangeInclusive<u64> {
     start / BLOCK_SIZE..=end / BLOCK_SIZE
 }
 
+/// Map cached byte ranges to time spans (seconds) assuming a uniform bitrate — the
+/// standard approximation, since the block cache is byte-addressed and has no
+/// byte↔time index. Spans are clamped to `[0, duration]`; returns empty when
+/// `duration <= 0` or `total_bytes == 0`.
+pub fn byte_ranges_to_time_spans(
+    ranges: &[(u64, u64)],
+    total_bytes: u64,
+    duration: f64,
+) -> Vec<(f64, f64)> {
+    if duration <= 0.0 || total_bytes == 0 {
+        return Vec::new();
+    }
+    let to_time = |byte: u64| (byte as f64 / total_bytes as f64 * duration).clamp(0.0, duration);
+    ranges
+        .iter()
+        .map(|&(start, end)| (to_time(start), to_time(end)))
+        .filter(|(start, end)| end > start && *start < duration)
+        .collect()
+}
+
 /// A handle to the on-disk cache for a single video. Cheap to clone; all state is shared
 /// behind `Arc`s / a `watch` sender.
 #[derive(Clone)]
@@ -106,6 +126,29 @@ impl BlockCache {
                 e - s + 1
             })
             .sum()
+    }
+
+    /// Contiguous byte ranges `[start, end)` covering every present block, with
+    /// adjacent blocks merged. Blocks are chunk-aligned, so ranges align to
+    /// `BLOCK_SIZE` except for a final partial block. Used to render cached coverage
+    /// on the seekbar; the lock is scoped to this call.
+    pub fn cached_byte_ranges(&self) -> Vec<(u64, u64)> {
+        let present = self.blocks.lock().unwrap();
+        let mut indexes: Vec<u64> = present.iter().copied().collect();
+        indexes.sort_unstable();
+        let mut ranges: Vec<(u64, u64)> = Vec::new();
+        for &i in &indexes {
+            let (start, end) = block_extent(i, self.total_size);
+            let end = end + 1; // convert inclusive extent to exclusive end
+            if let Some((_, last_end)) = ranges.last_mut()
+                && *last_end == start
+            {
+                *last_end = end;
+            } else {
+                ranges.push((start, end));
+            }
+        }
+        ranges
     }
 
     fn manifest_path(&self) -> PathBuf {
@@ -420,6 +463,73 @@ mod tests {
         assert_eq!((*r.start(), *r.end()), (0, 1));
         let r = blocks_between(1_000, 1_999_999);
         assert_eq!((*r.start(), *r.end()), (0, 3));
+    }
+
+    /// A cache with only given blocks marked present; testing coverage queries
+    /// without touching the network.
+    fn cache_with_blocks(total_size: u64, present: &[u64]) -> BlockCache {
+        let cache = BlockCache::new(&temp_cache_dir(), 1, 1, total_size);
+        let mut blocks = cache.blocks.lock().unwrap();
+        blocks.extend(present.iter().copied());
+        drop(blocks);
+        cache
+    }
+
+    #[tokio::test]
+    async fn cached_byte_ranges_empty_when_nothing_cached() {
+        let cache = cache_with_blocks(1_000_000, &[]);
+        assert!(cache.cached_byte_ranges().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cached_byte_ranges_returned_sorted_even_for_unsorted_presence() {
+        // 3 MB = 6 blocks; indexes 3, 0, 1 are all valid.
+        let cache = cache_with_blocks(6 * BLOCK_SIZE, &[3, 0, 1]);
+        assert_eq!(
+            cache.cached_byte_ranges(),
+            vec![(0, 2 * BLOCK_SIZE), (3 * BLOCK_SIZE, 4 * BLOCK_SIZE)]
+        );
+    }
+
+    #[tokio::test]
+    async fn cached_byte_ranges_merge_adjacent_and_keep_gaps() {
+        // 4 MB = 8 blocks; indexes 2, 3, 5 are all valid.
+        let cache = cache_with_blocks(8 * BLOCK_SIZE, &[2, 3, 5]);
+        assert_eq!(
+            cache.cached_byte_ranges(),
+            vec![
+                (2 * BLOCK_SIZE, 4 * BLOCK_SIZE),
+                (5 * BLOCK_SIZE, 6 * BLOCK_SIZE)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn cached_byte_ranges_partial_final_block() {
+        let cache = cache_with_blocks(600_000, &[0, 1]); // block 1 is 75 KiB
+        assert_eq!(cache.cached_byte_ranges(), vec![(0, 600_000)]);
+    }
+
+    #[test]
+    fn byte_ranges_to_time_spans_maps_linearly() {
+        let spans = byte_ranges_to_time_spans(&[(0, 500_000)], 1_000_000, 100.0);
+        assert_eq!(spans, vec![(0.0, 50.0)]);
+    }
+
+    #[test]
+    fn byte_ranges_to_time_spans_clamps_to_duration() {
+        assert_eq!(
+            byte_ranges_to_time_spans(&[(900_000, 1_200_000)], 1_000_000, 100.0),
+            vec![(90.0, 100.0)]
+        );
+        // A range entirely past the end of playback collapses and is dropped.
+        assert!(byte_ranges_to_time_spans(&[(1_500_000, 1_800_000)], 1_000_000, 100.0).is_empty());
+    }
+
+    #[test]
+    fn byte_ranges_to_time_spans_rejects_no_media() {
+        assert!(byte_ranges_to_time_spans(&[(0, 500_000)], 1_000_000, 0.0).is_empty());
+        assert!(byte_ranges_to_time_spans(&[(0, 500_000)], 0, 100.0).is_empty());
     }
 
     #[tokio::test]

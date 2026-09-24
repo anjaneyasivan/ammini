@@ -6,3 +6,6 @@ git_only = true
 # Only cut a release when the release PR is merged, not on every direct
 # push to main.
 release_always = false
+# Nothing to semver-check on a binary; skips the cargo-semver-checks
+# install/run in CI.
+semver_check = false

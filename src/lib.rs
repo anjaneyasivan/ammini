@@ -1,3 +1,4 @@
+pub mod display_sleep;
 pub mod fonts;
 pub mod fsm;
 pub mod proxy;

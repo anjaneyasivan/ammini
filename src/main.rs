@@ -105,6 +105,9 @@ struct AmminiApp {
     /// drained once per frame to measure seek latency. Shared with the widget via
     /// an Arc because the callback outlives the frame that installed it.
     pending_seek: Arc<std::sync::Mutex<Option<SeekTracker>>>,
+    /// Keeps the macOS display awake while media is actually playing (released on
+    /// pause); no-op on other platforms.
+    display_sleep: ammini::display_sleep::Guard,
 }
 
 impl AmminiApp {
@@ -172,6 +175,7 @@ impl AmminiApp {
             subtitle_tracks: Vec::new(),
             subtitle_track_count: 0,
             pending_seek: Arc::new(std::sync::Mutex::new(None)),
+            display_sleep: ammini::display_sleep::Guard::new(),
         };
         app.fsm.init();
         info!("app initialized");
@@ -250,6 +254,21 @@ impl AmminiApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context, events: &mut Vec<PlayerEvent>) {
+        // Close/quit must fire even while a text field has focus. Both go through
+        // `ViewportCommand::Close` so eframe runs `App::save` (which finalizes the
+        // session: resume offset + recent-file entry) before exiting. On macOS, the
+        // winit-installed Quit menu item already intercepts Cmd+Q and funnels it into
+        // the same save-on-exit path; this keeps Cmd+W (no menu item) and non-macOS
+        // builds working too.
+        if ctx.input(|i| i.key_pressed(egui::Key::W) && i.modifiers.command) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Q) && i.modifiers.command) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+
         // Let text fields (URL dialog, Telegram auth inputs) own the keyboard.
         if ctx.egui_wants_keyboard_input() {
             return;
@@ -368,6 +387,16 @@ impl AmminiApp {
         {
             ammini::telemetry::emit(TelemetryEvent::Metric(Metric::SeekLatencyMs { ms }));
         }
+    }
+
+    /// Hold/release the macOS display-sleep assertion based on whether media is
+    /// actually playing (loaded and unpaused), so the screen doesn't dim during
+    /// playback but macOS's normal dim/sleep behavior applies while paused. Runs
+    /// once per frame; `set_playing` is idempotent.
+    fn update_display_sleep(&mut self) {
+        let playing = !self.player_mut().paused().unwrap_or(true)
+            && matches!(self.player_mut().duration(), Ok(Some(_)));
+        self.display_sleep.set_playing(playing);
     }
 
     /// Refresh the audio and subtitle track lists from mpv. Only the scalar
@@ -740,6 +769,7 @@ impl App for AmminiApp {
             self.fsm.handle(&event);
         }
         self.poll_seek();
+        self.update_display_sleep();
 
         egui::CentralPanel::default().show(ui, |ui| {
             let pending = self.pending_seek.clone();
@@ -766,6 +796,12 @@ impl App for AmminiApp {
             let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
             persistent.volume = Some(volume);
         }
+        // Record the final playing offset (unthrottled) and pin the current file in the
+        // recent list, so quitting (Cmd+W/Cmd+Q or the close button) leaves a fresh
+        // resume point behind even if playback was paused or switched mid-stream.
+        // SAFETY: `finalize_session` touches only plain UI data (resume map, recent
+        // files) and reads the playback position — no state-machine invariants.
+        unsafe { self.fsm.inner_mut().finalize_session() };
         if let Ok(s) = serde_json::to_string(&self.fsm.persistent) {
             storage.set_string(APP_KEY, s);
         }

@@ -14,6 +14,8 @@ const RESUME_WRITE_INTERVAL: Duration = Duration::from_secs(1);
 const RESUME_MIN_SECONDS: f64 = 3.0;
 /// Upper bound on tracked resume positions; the map is cleared when exceeded.
 const RESUME_MAX_ENTRIES: usize = 200;
+/// Cap for the recent-files list.
+const RECENT_FILES_MAX: usize = 10;
 /// Cap for the recent-Telegram list (same as recent files).
 const RECENT_TELEGRAM_MAX: usize = 10;
 
@@ -165,7 +167,7 @@ impl PlayerFsm {
 
                 self.persistent.recent_files.retain(|p| p != path);
                 self.persistent.recent_files.insert(0, path.clone());
-                self.persistent.recent_files.truncate(10);
+                self.persistent.recent_files.truncate(RECENT_FILES_MAX);
 
                 sync_persistent_playlist(self);
                 load_media(self, path.clone())
@@ -244,16 +246,9 @@ impl PlayerFsm {
 
 fn load_media(fsm: &mut PlayerFsm, path: String) -> Outcome<FsmState> {
     // Proxy URLs are session-scoped (the proxy port changes every launch), so only
-    // local files can resume.
-    fsm.resume_pending = if path.starts_with("http") {
-        None
-    } else {
-        fsm.persistent
-            .resume
-            .get(&path)
-            .copied()
-            .filter(|&p| p > RESUME_MIN_SECONDS)
-    };
+    // local files can resume. Any local open — the Open File dialog, the playlist,
+    // or a Recent-menu pick — resumes from the saved offset when one exists.
+    fsm.resume_pending = resume_offset(&fsm.persistent.resume, &path);
     match fsm.player.load_file(&path) {
         Ok(()) => {
             info!("loading media: {path}");
@@ -274,6 +269,20 @@ fn load_media(fsm: &mut PlayerFsm, path: String) -> Outcome<FsmState> {
             fsm.status = format!("Error loading {path}: {e}");
             Transition(FsmState::error())
         }
+    }
+}
+
+/// The offset to resume `path` from, if any. Local files only (proxy URLs are
+/// session-scoped), and only when the saved position is above `RESUME_MIN_SECONDS` —
+/// anything smaller is not worth resuming.
+fn resume_offset(resume: &HashMap<String, f64>, path: &str) -> Option<f64> {
+    if path.starts_with("http") {
+        None
+    } else {
+        resume
+            .get(path)
+            .copied()
+            .filter(|&p| p > RESUME_MIN_SECONDS)
     }
 }
 
@@ -314,7 +323,14 @@ impl PlayerFsm {
             return;
         }
         self.last_resume_write = Some(now);
+        self.record_current_position();
+    }
 
+    /// Write the current playback position to `persistent.resume` (local files only),
+    /// unthrottled. The `playing` state goes through the throttled
+    /// `record_resume_position`; `finalize_session` calls this directly on quit so the
+    /// saved offset is never stale.
+    fn record_current_position(&mut self) {
         let Some(path) = self
             .current_index
             .and_then(|i| self.playlist.get(i))
@@ -335,6 +351,25 @@ impl PlayerFsm {
             self.persistent.resume.clear();
         }
         self.persistent.resume.insert(path, pos);
+    }
+
+    /// Finalize the session before the state is persisted (called from `App::save`,
+    /// so it runs on Cmd+W/Cmd+Q/the close button and every autosave): record the
+    /// current playing offset unthrottled and pin the current file in the recent list.
+    /// Local files only.
+    pub fn finalize_session(&mut self) {
+        self.record_current_position();
+        let Some(path) = self
+            .current_index
+            .and_then(|i| self.playlist.get(i))
+            .cloned()
+        else {
+            return;
+        };
+        if path.starts_with("http") {
+            return;
+        }
+        record_recent_file(&mut self.persistent.recent_files, &path);
     }
 }
 
@@ -358,6 +393,14 @@ pub fn track_label(title: Option<String>, lang: Option<String>, index: usize) ->
     }
 }
 
+/// Move `path` to the front of the recent-files list (deduped), capped at
+/// `RECENT_FILES_MAX` entries. Local files only; callers skip proxy/remote URLs.
+pub fn record_recent_file(recent: &mut Vec<String>, path: &str) {
+    recent.retain(|p| p != path);
+    recent.insert(0, path.to_owned());
+    recent.truncate(RECENT_FILES_MAX);
+}
+
 /// Move `entry` to the front of the recent-Telegram list (deduped by msg_id), capped at
 /// `RECENT_TELEGRAM_MAX` entries.
 pub fn record_recent_telegram(recent: &mut Vec<RecentTelegram>, entry: RecentTelegram) {
@@ -368,8 +411,11 @@ pub fn record_recent_telegram(recent: &mut Vec<RecentTelegram>, entry: RecentTel
 
 #[cfg(test)]
 mod tests {
-    use super::{RecentTelegram, record_recent_telegram, track_label};
+    use super::{
+        RecentTelegram, record_recent_file, record_recent_telegram, resume_offset, track_label,
+    };
     use grammers_session::types::{PeerAuth, PeerId, PeerRef};
+    use std::collections::HashMap;
 
     fn entry(msg_id: i32, name: &str) -> RecentTelegram {
         RecentTelegram {
@@ -381,6 +427,46 @@ mod tests {
             msg_id,
             name: name.into(),
         }
+    }
+
+    #[test]
+    fn record_recent_file_dedupes_and_moves_to_front() {
+        let mut recent = vec!["b.mp4".into(), "a.mp4".into()];
+        record_recent_file(&mut recent, "b.mp4");
+        assert_eq!(recent, vec!["b.mp4", "a.mp4"]);
+        record_recent_file(&mut recent, "c.mp4");
+        assert_eq!(recent, vec!["c.mp4", "b.mp4", "a.mp4"]);
+    }
+
+    #[test]
+    fn record_recent_file_is_capped() {
+        let mut recent = Vec::new();
+        for i in 0..25 {
+            record_recent_file(&mut recent, &format!("v{i}.mp4"));
+        }
+        assert_eq!(recent.len(), 10);
+        assert_eq!(recent.first().unwrap(), "v24.mp4");
+        assert_eq!(recent.last().unwrap(), "v15.mp4");
+    }
+
+    #[test]
+    fn resume_offset_reads_saved_position() {
+        let mut resume = HashMap::new();
+        resume.insert("/videos/a.mp4".into(), 42.5);
+        assert_eq!(resume_offset(&resume, "/videos/a.mp4"), Some(42.5));
+        assert_eq!(resume_offset(&resume, "/videos/missing.mp4"), None);
+    }
+
+    #[test]
+    fn resume_offset_skips_remote_and_tiny_positions() {
+        let mut resume = HashMap::new();
+        resume.insert("http://127.0.0.1:8080/telegram/3".into(), 9.0);
+        resume.insert("/videos/b.mp4".into(), 2.0); // below RESUME_MIN_SECONDS
+        assert_eq!(
+            resume_offset(&resume, "http://127.0.0.1:8080/telegram/3"),
+            None
+        );
+        assert_eq!(resume_offset(&resume, "/videos/b.mp4"), None);
     }
 
     #[test]

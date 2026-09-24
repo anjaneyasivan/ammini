@@ -19,7 +19,9 @@ Telegram account.
 - **Persistent state across restarts**: recent files, the current playlist and track,
   volume, per-file resume positions (local files only), and a "Recent Telegram files"
   section in the Recent menu — recently played Telegram videos are replayed by
-  refetching their message, so they work even after a restart or chat switch.
+  refetching their message, so they work even after a restart or chat switch. Quitting
+  (`Cmd+W` / `Cmd+Q`) saves the current position; picking a recent file resumes from it
+  when one exists, and playback keeps the display awake (macOS).
 - Telegram sidebar (`Cmd+T`): phone/2FA sign-in, chat list, message list with video
   playback, load-more pagination, and real sign-out (revokes the session and wipes local
   data).
@@ -130,6 +132,8 @@ Worth knowing:
 | `Ctrl/Cmd + P` | Toggle playlist panel |
 | `Ctrl/Cmd + T` | Toggle Telegram panel |
 | `Ctrl/Cmd + Left/Right` | Previous/next file |
+| `Ctrl/Cmd + W` | Close the window (quits, saving the resume position + recent entry) |
+| `Ctrl/Cmd + Q` | Quit (same save-on-exit behavior) |
 | `Space` | Play/pause (when the video surface is not focused) |
 | `F` | Toggle fullscreen |
 | `M` | Mute/unmute |

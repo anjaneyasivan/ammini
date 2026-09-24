@@ -29,6 +29,9 @@ bytes = "1"
 tokio-stream = "0.1"
 urlencoding = "2"
 egui_material_icons = "0.7"
+# Keeps the display awake while video plays (macOS: IOKit assertions; Windows/Linux
+# have their own backends). The library API is best-effort when unsupported.
+keepawake = "0.6"
 # Same version egui-sharkplayer uses; unifies to the same libmpv instance so the
 # vendored `PlayerState::mpv()` accessor can read/set arbitrary mpv properties.
 libmpv2 = "6"

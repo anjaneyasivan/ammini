@@ -167,6 +167,34 @@ The script:
 Install it with `open dist/Ammini-<version>.dmg` and drag **Ammini** into
 **Applications**, or run it in place with `open dist/Ammini.app`.
 
+### Supported macOS versions
+
+The bundle's minimum OS is set by the **third-party libraries**, not by Ammini. Homebrew
+compiles libmpv and its dependencies for the macOS it is running on, and the bundler
+copies those binaries verbatim — so the app inherits their deployment target. Building on
+macOS 27 yields an app that only launches on macOS 27+; on an older Mac, `dyld` aborts
+before `main` with a `Symbol missing` error (for example `_pipe2`, referenced by
+`libglib-2.0.0.dylib`, which does not exist in older `libSystem`).
+
+**Build the DMG on the oldest macOS you intend to support.** The script prints the highest
+deployment target it finds, warns if it exceeds the intended floor, and writes the real
+value into `LSMinimumSystemVersion` so older systems show a "requires macOS X" dialog
+instead of crashing. `MIN_MACOS` (default: the build machine's macOS) declares the oldest
+macOS the app must run on; set it explicitly when building for a specific target, e.g.
+`MIN_MACOS=15.5 scripts/bundle-macos.sh`, and the script flags it *before* the release
+build when this machine can't deliver that floor. Pinning a CI runner (for example a
+`macos-15` GitHub Actions runner with `brew install mpv`) is the practical way to keep
+shipping builds that run on older releases.
+
+To inspect a built bundle yourself:
+
+```bash
+for f in Ammini.app/Contents/MacOS/Ammini Ammini.app/Contents/Frameworks/*.dylib; do
+  printf '%s  ' "$(basename "$f")"
+  otool -l "$f" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}'
+done | sort -k2 -V | tail
+```
+
 Notes:
 
 - **Signing.** Everything is ad-hoc signed, which is enough locally. Recipients of the

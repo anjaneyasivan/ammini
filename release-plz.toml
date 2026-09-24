@@ -1,0 +1,8 @@
+[workspace]
+# Ammini is a binary app, never published to crates.io: versions and
+# releases are tracked purely through git tags (v<version>).
+publish = false
+git_only = true
+# Only cut a release when the release PR is merged, not on every direct
+# push to main.
+release_always = false

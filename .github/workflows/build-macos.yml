@@ -1,0 +1,76 @@
+name: Build macOS App
+
+# Bundles dist/Ammini-<version>.dmg on a macos-15 (Sequoia) runner so the
+# Homebrew-built libmpv closure keeps the deployment target low. The real
+# LSMinimumSystemVersion floor is auto-detected by scripts/bundle-macos.sh
+# from the bundled dylibs; MIN_MACOS only drives the pre-build floor check.
+#
+# Runs on tag pushes (v*) and manually via workflow_dispatch, e.g.:
+#   gh workflow run build-macos.yml --ref main
+#   gh workflow run build-macos.yml --ref v0.2.0
+# The DMG and the full bundler output are uploaded as run artifacts; on a
+# tag ref the DMG is also attached to the matching GitHub Release.
+#
+# Note: tags/releases created by GITHUB_TOKEN (release-plz) do NOT trigger
+# this workflow — dispatch it manually for release-plz-made tags.
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_macos:
+        description: "Oldest macOS the bundle should run on (floor check only)"
+        required: false
+        default: "15.0"
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write        # attach the DMG to the GitHub Release
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install libmpv
+        run: brew install mpv
+
+      # Credentials are baked into the binary at compile time by build.rs
+      # (real env wins; there is no .env on CI).
+      - name: Build and bundle
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_OTLP_URL: ${{ secrets.SENTRY_OTLP_URL }}
+          MIN_MACOS: ${{ inputs.min_macos || '15.0' }}
+        run: set -o pipefail && ./scripts/bundle-macos.sh 2>&1 | tee bundle-output.log
+
+      - name: Upload bundler output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-output
+          path: bundle-output.log
+
+      - name: Upload DMG
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ammini-macos-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+      - name: Attach DMG to GitHub Release
+        if: success() && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" dist/*.dmg --clobber \
+            || gh release create "$GITHUB_REF_NAME" dist/*.dmg \
+                 --title "Ammini $GITHUB_REF_NAME" --generate-notes

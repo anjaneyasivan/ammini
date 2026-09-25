@@ -143,6 +143,7 @@ Worth knowing:
 | `Ctrl/Cmd + Q` | Quit (same save-on-exit behavior) |
 | `Space` | Play/pause (when the video surface is not focused) |
 | `F` | Toggle fullscreen |
+| `Esc` | Leave fullscreen |
 | `M` | Mute/unmute |
 | `+` / `-` | Volume ±5 |
 

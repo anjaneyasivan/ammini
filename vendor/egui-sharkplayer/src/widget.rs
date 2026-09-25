@@ -798,9 +798,15 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
     }
 
     fn toggle_fullscreen(ui: &egui::Ui, ui_state: &mut UiState, player_id: egui::Id) {
-        ui_state.fullscreen ^= true;
-        ui.ctx()
-            .send_viewport_cmd(egui::ViewportCommand::Fullscreen(ui_state.fullscreen));
+        // Derive from the real window state, not a local flag: the window can also
+        // change fullscreen outside this widget (host app shortcuts, the OS), and
+        // `ui_state.fullscreen` is re-synced from the viewport every frame.
+        let enter = !ui
+            .ctx()
+            .input(|i| i.viewport().fullscreen)
+            .unwrap_or(false);
+        ui_state.fullscreen = enter;
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(enter));
         ui.ctx().memory_mut(|mem| mem.request_focus(player_id));
     }
 
@@ -949,6 +955,12 @@ impl<P: ControlsIconProvider> egui::Widget for SharkPlayer<'_, P> {
             ui.ctx().memory_mut(|mem| mem.request_focus(player_id));
             ui_state.requested_initial_focus = true;
         }
+
+        // Follow the real window state so the fullscreen layout exits however
+        // fullscreen was left (F key, Esc in the host app, native macOS chrome).
+        ui_state.fullscreen = ui
+            .input(|i| i.viewport().fullscreen)
+            .unwrap_or(false);
 
         let response = if ui_state.fullscreen {
             let rect = ui.ctx().content_rect();

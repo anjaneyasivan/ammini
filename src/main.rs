@@ -289,6 +289,14 @@ impl AmminiApp {
             return;
         }
 
+        // Esc leaves fullscreen no matter what has focus.
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+            if is_fullscreen {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            }
+        }
+
         // Transport keys are handled by the SharkPlayer widget while the video surface
         // has focus; these app-level fallbacks cover clicks elsewhere in the window.
         let video_focused = self

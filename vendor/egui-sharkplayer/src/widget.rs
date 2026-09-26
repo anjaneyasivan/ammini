@@ -16,7 +16,11 @@ const HOUR: f64 = MINUTE * 60.0;
 
 macro_rules! info_prop {
     ($self:expr, String => $prop:ident, $display:literal) => {{
-        let str = $self.backend.$prop().ok().unwrap_or_else(|| "Unknown".into());
+        let str = $self
+            .backend
+            .$prop()
+            .ok()
+            .unwrap_or_else(|| "Unknown".into());
         info_prop!($display, str)
     }};
     ($self:expr, OptionalString => $prop:ident, $display:literal) => {{
@@ -63,17 +67,39 @@ macro_rules! info_props {
 }
 
 pub trait ControlsIconProvider {
-    fn play(&self) -> WidgetText { "▶".into() }
-    fn pause(&self) -> WidgetText { "⏸".into() }
-    fn skip_backward(&self) -> WidgetText { "<<".into() }
-    fn skip_forward(&self) -> WidgetText { ">>".into() }
-    fn info(&self) -> WidgetText { "i".into() }
-    fn muted_volume(&self) -> WidgetText { "🔇".into() }
-    fn low_volume(&self) -> WidgetText { "🔈".into() }
-    fn medium_volume(&self) -> WidgetText { "🔉".into() }
-    fn high_volume(&self) -> WidgetText { "🔊".into() }
-    fn fullscreen(&self) -> WidgetText { "⛶".into() }
-    fn fullscreen_exit(&self) -> WidgetText { "🗗".into() }
+    fn play(&self) -> WidgetText {
+        "▶".into()
+    }
+    fn pause(&self) -> WidgetText {
+        "⏸".into()
+    }
+    fn skip_backward(&self) -> WidgetText {
+        "<<".into()
+    }
+    fn skip_forward(&self) -> WidgetText {
+        ">>".into()
+    }
+    fn info(&self) -> WidgetText {
+        "i".into()
+    }
+    fn muted_volume(&self) -> WidgetText {
+        "🔇".into()
+    }
+    fn low_volume(&self) -> WidgetText {
+        "🔈".into()
+    }
+    fn medium_volume(&self) -> WidgetText {
+        "🔉".into()
+    }
+    fn high_volume(&self) -> WidgetText {
+        "🔊".into()
+    }
+    fn fullscreen(&self) -> WidgetText {
+        "⛶".into()
+    }
+    fn fullscreen_exit(&self) -> WidgetText {
+        "🗗".into()
+    }
 }
 
 /// The default [`ControlsIconProvider`].
@@ -142,69 +168,69 @@ pub enum Sizing {
 type Binding = &'static [egui::Key];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Keybinds {
-    pub toggle_pause:      Binding,
+    pub toggle_pause: Binding,
     pub toggle_fullscreen: Binding,
-    pub toggle_info:       Binding,
-    pub toggle_mute:       Binding,
-    pub skip_forward:      Binding,
-    pub skip_backward:     Binding,
-    pub volume_up:         Binding,
-    pub volume_down:       Binding,
+    pub toggle_info: Binding,
+    pub toggle_mute: Binding,
+    pub skip_forward: Binding,
+    pub skip_backward: Binding,
+    pub volume_up: Binding,
+    pub volume_down: Binding,
 }
 
 impl Default for Keybinds {
     fn default() -> Self {
         Self {
-            toggle_pause:      &[Key::Space, Key::K],
-            toggle_info:       &[Key::I],
-            toggle_mute:       &[Key::M],
+            toggle_pause: &[Key::Space, Key::K],
+            toggle_info: &[Key::I],
+            toggle_mute: &[Key::M],
             toggle_fullscreen: &[Key::F],
-            skip_forward:      &[Key::ArrowRight, Key::L],
-            skip_backward:     &[Key::ArrowLeft, Key::J],
-            volume_up:         &[Key::ArrowUp],
-            volume_down:       &[Key::ArrowDown],
+            skip_forward: &[Key::ArrowRight, Key::L],
+            skip_backward: &[Key::ArrowLeft, Key::J],
+            volume_up: &[Key::ArrowUp],
+            volume_down: &[Key::ArrowDown],
         }
     }
 }
 
 #[derive(Clone, Default)]
 struct UiState {
-    hover_start:             Option<(Instant, egui::Pos2)>,
-    show_info:               bool,
-    show_volume_slider:      bool,
-    dragged_time:            Option<f64>,
-    dragged_volume:          Option<f64>,
-    fullscreen:              bool,
+    hover_start: Option<(Instant, egui::Pos2)>,
+    show_info: bool,
+    show_volume_slider: bool,
+    dragged_time: Option<f64>,
+    dragged_volume: Option<f64>,
+    fullscreen: bool,
     requested_initial_focus: bool,
     /// Last valid playback position; fallback while mpv reports `time-pos`
     /// unavailable (e.g. mid-seek), so the label never flashes a bogus `00:00`.
-    last_time_pos:           f64,
+    last_time_pos: f64,
 }
 
 /// The video player widget. This is what actually get's created in the `ui`
 /// function.
 #[must_use]
 pub struct SharkPlayer<'a, P: ControlsIconProvider = DefaultControlsIconProvider> {
-    backend:            &'a mut PlayerState,
-    icons:              P,
-    sizing:             Option<Sizing>,
-    bar_height:         f32,
+    backend: &'a mut PlayerState,
+    icons: P,
+    sizing: Option<Sizing>,
+    bar_height: f32,
     default_info_width: f32,
-    skip_seconds:       f64,
-    volume_step:        f64,
-    background_color:   Color32,
-    controls_timeout:   Duration,
-    animations:         bool,
-    keybinds:           Keybinds,
-    on_error:           Rc<dyn Fn(Error)>,
+    skip_seconds: f64,
+    volume_step: f64,
+    background_color: Color32,
+    controls_timeout: Duration,
+    animations: bool,
+    keybinds: Keybinds,
+    on_error: Rc<dyn Fn(Error)>,
     // Ammini patch #3: invoked after an arrow/skip-button seek, so the app can
     // measure seek latency. `true` = forward, second arg = the widget-side
     // predicted target position after the skip.
-    seek_callback:      Option<Rc<dyn Fn(bool, f64)>>,
+    seek_callback: Option<Rc<dyn Fn(bool, f64)>>,
     // Ammini patch #4: cached byte-range coverage (video time in seconds) shaded
     // lighter than the rail, plus the fill color (theme-derived by the app).
-    cache_spans:        Vec<(f64, f64)>,
-    cache_color:        Color32,
+    cache_spans: Vec<(f64, f64)>,
+    cache_color: Color32,
 }
 
 impl<'a> SharkPlayer<'a> {
@@ -363,7 +389,7 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
     fn player_ui(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
         let ppp = ui.ctx().pixels_per_point();
         let size = FramebufferSize {
-            width:  (rect.width() * ppp).floor() as i32,
+            width: (rect.width() * ppp).floor() as i32,
             height: (rect.height() * ppp).floor() as i32,
         };
 
@@ -399,7 +425,8 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
                     egui::pos2(0.0, 1.0), // Flipped Y
                     egui::pos2(1.0, 0.0),
                 );
-                ui.painter().image(texture_id, rect, uv, egui::Color32::WHITE);
+                ui.painter()
+                    .image(texture_id, rect, uv, egui::Color32::WHITE);
             }
         }
     }
@@ -449,7 +476,8 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
                             .x
                     })
                     .fold(0.0_f32, f32::max);
-                let value_wrap_width = ui.available_width() - key_col_width - ui.spacing().item_spacing.x;
+                let value_wrap_width =
+                    ui.available_width() - key_col_width - ui.spacing().item_spacing.x;
 
                 egui::Grid::new(ui.id().with("info-grid"))
                     .max_col_width(value_wrap_width)
@@ -481,7 +509,7 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
     }
 
     fn action_seek_back(&self, current_time: &mut f64) {
-        *current_time = (*current_time - self.skip_seconds).min(0.);
+        *current_time = (*current_time - self.skip_seconds).max(0.);
         if let Err(e) = self.backend.seek_relative(-self.skip_seconds) {
             (self.on_error)(Error::new(e, ErrorCause::SeekBack(self.skip_seconds)));
         }
@@ -549,34 +577,76 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
             );
         });
 
-        if ui.input(|i| self.keybinds.toggle_pause.iter().any(|&key| i.key_pressed(key))) {
+        // The host owns Command shortcuts (Cmd/Ctrl+←/→ = previous/next track). Ignore
+        // the widget's own transport keys while Command is held so a Cmd+arrow doesn't
+        // also seek the current video.
+        if ui.input(|i| i.modifiers.command) {
+            return;
+        }
+
+        if ui.input(|i| {
+            self.keybinds
+                .toggle_pause
+                .iter()
+                .any(|&key| i.key_pressed(key))
+        }) {
             self.action_toggle_payback(ui, *current_time, duration);
         }
 
-        if ui.input(|i| self.keybinds.skip_forward.iter().any(|&key| i.key_pressed(key))) {
+        if ui.input(|i| {
+            self.keybinds
+                .skip_forward
+                .iter()
+                .any(|&key| i.key_pressed(key))
+        }) {
             self.action_seek_forward(current_time);
         }
-        if ui.input(|i| self.keybinds.skip_backward.iter().any(|&key| i.key_pressed(key))) {
+        if ui.input(|i| {
+            self.keybinds
+                .skip_backward
+                .iter()
+                .any(|&key| i.key_pressed(key))
+        }) {
             self.action_seek_back(current_time);
         }
-        if ui.input(|i| self.keybinds.toggle_mute.iter().any(|&key| i.key_pressed(key))) {
+        if ui.input(|i| {
+            self.keybinds
+                .toggle_mute
+                .iter()
+                .any(|&key| i.key_pressed(key))
+        }) {
             self.action_toggle_mute(ui);
         }
 
-        if ui.input(|i| self.keybinds.volume_up.iter().any(|&key| i.key_pressed(key))) {
+        if ui.input(|i| {
+            self.keybinds
+                .volume_up
+                .iter()
+                .any(|&key| i.key_pressed(key))
+        }) {
             let vol = self.backend.volume().unwrap_or(100.0) + self.volume_step;
             if let Err(e) = self.backend.set_volume(vol) {
                 (self.on_error)(Error::new(e, ErrorCause::IncreaseVolume(self.volume_step)));
             }
         }
-        if ui.input(|i| self.keybinds.volume_down.iter().any(|&key| i.key_pressed(key))) {
+        if ui.input(|i| {
+            self.keybinds
+                .volume_down
+                .iter()
+                .any(|&key| i.key_pressed(key))
+        }) {
             let vol = self.backend.volume().unwrap_or(100.0) - self.volume_step;
             if let Err(e) = self.backend.set_volume(vol) {
                 (self.on_error)(Error::new(e, ErrorCause::DecreaseVolume(self.volume_step)));
             }
         }
 
-        if ui.input(|i| self.keybinds.toggle_info.iter().any(|&key| i.key_pressed(key))) {
+        if ui.input(|i| {
+            self.keybinds
+                .toggle_info
+                .iter()
+                .any(|&key| i.key_pressed(key))
+        }) {
             ui_state.show_info ^= true;
         }
 
@@ -658,7 +728,10 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
     fn fixed_time_label(ui: &mut egui::Ui, text: String, template: &str) {
         let font_id = egui::TextStyle::Body.resolve(ui.style());
         let width = ui.fonts_mut(|f| {
-            template.chars().map(|c| f.glyph_width(&font_id, c)).sum::<f32>()
+            template
+                .chars()
+                .map(|c| f.glyph_width(&font_id, c))
+                .sum::<f32>()
         });
         let height = ui.text_style_height(&egui::TextStyle::Body);
         ui.add_sized(
@@ -690,7 +763,13 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
         }
     }
 
-    fn seekbar(&self, ui: &mut egui::Ui, ui_state: &mut UiState, current_time: &mut f64, duration: f64) {
+    fn seekbar(
+        &self,
+        ui: &mut egui::Ui,
+        ui_state: &mut UiState,
+        current_time: &mut f64,
+        duration: f64,
+    ) {
         ui.spacing_mut().slider_width = ui.available_width();
 
         // Ammini patch #4: the seekbar is painted manually instead of via egui's
@@ -728,7 +807,8 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
 
         if duration > 0.0 {
             let to_x = |seconds: f64| {
-                position_range.min + (seconds / duration).clamp(0.0, 1.0) as f32 * position_range.span()
+                position_range.min
+                    + (seconds / duration).clamp(0.0, 1.0) as f32 * position_range.span()
             };
 
             // Ammini patch #4: cached ranges, a lighter shade than the rail, painted
@@ -754,7 +834,11 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
             let center = egui::pos2(to_x(*current_time), rail_rect.center().y);
             let mut trailing_rail_rect = rail_rect;
             trailing_rail_rect.max.x = center.x + f32::from(corner_radius.nw);
-            painter.rect_filled(trailing_rail_rect, corner_radius, ui.visuals().selection.bg_fill);
+            painter.rect_filled(
+                trailing_rail_rect,
+                corner_radius,
+                ui.visuals().selection.bg_fill,
+            );
 
             // Handle.
             let radius = handle_radius + visuals.expansion;
@@ -826,12 +910,10 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
         // Derive from the real window state, not a local flag: the window can also
         // change fullscreen outside this widget (host app shortcuts, the OS), and
         // `ui_state.fullscreen` is re-synced from the viewport every frame.
-        let enter = !ui
-            .ctx()
-            .input(|i| i.viewport().fullscreen)
-            .unwrap_or(false);
+        let enter = !ui.ctx().input(|i| i.viewport().fullscreen).unwrap_or(false);
         ui_state.fullscreen = enter;
-        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(enter));
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::Fullscreen(enter));
         ui.ctx().memory_mut(|mem| mem.request_focus(player_id));
     }
 
@@ -855,8 +937,10 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
         duration: f64,
         player_id: egui::Id,
     ) {
-        let controls_rect =
-            egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - self.bar_height), rect.max);
+        let controls_rect = egui::Rect::from_min_max(
+            egui::pos2(rect.min.x, rect.max.y - self.bar_height),
+            rect.max,
+        );
         ui.scope_builder(egui::UiBuilder::new().max_rect(controls_rect), |ui| {
             egui::Frame::menu(ui.style())
                 .corner_radius(0.)
@@ -886,7 +970,11 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
         ui_state: &mut UiState,
         player_id: egui::Id,
     ) {
-        let player_response = ui.interact(rect, player_id, egui::Sense::FOCUSABLE | egui::Sense::click());
+        let player_response = ui.interact(
+            rect,
+            player_id,
+            egui::Sense::FOCUSABLE | egui::Sense::click(),
+        );
         if player_response.clicked() {
             player_response.request_focus();
         }
@@ -905,10 +993,9 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
         if let Some(position) = live_time {
             ui_state.last_time_pos = position;
         }
-        let mut current_time =
-            ui_state
-                .dragged_time
-                .unwrap_or(live_time.unwrap_or(ui_state.last_time_pos));
+        let mut current_time = ui_state
+            .dragged_time
+            .unwrap_or(live_time.unwrap_or(ui_state.last_time_pos));
         let duration = live_duration.unwrap_or(0.0);
         self.handle_keybinds(
             ui,
@@ -918,6 +1005,12 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
             duration,
             player_id,
         );
+        // A skip button/arrow previews the target for this frame; keep it inside the
+        // media so the played fill (and the cache shade it uncovers) can't shoot past
+        // the ends of the bar.
+        if duration > 0.0 {
+            current_time = current_time.clamp(0.0, duration);
+        }
         // Determine whether to show controls
         {
             let is_hovered = ui.rect_contains_pointer(rect);
@@ -983,9 +1076,7 @@ impl<P: ControlsIconProvider> egui::Widget for SharkPlayer<'_, P> {
 
         // Follow the real window state so the fullscreen layout exits however
         // fullscreen was left (F key, Esc in the host app, native macOS chrome).
-        ui_state.fullscreen = ui
-            .input(|i| i.viewport().fullscreen)
-            .unwrap_or(false);
+        ui_state.fullscreen = ui.input(|i| i.viewport().fullscreen).unwrap_or(false);
 
         let response = if ui_state.fullscreen {
             let rect = ui.ctx().content_rect();
@@ -997,20 +1088,28 @@ impl<P: ControlsIconProvider> egui::Widget for SharkPlayer<'_, P> {
                     self.show_in_rect(ui, rect, &mut ui_state, player_id);
                 });
 
-            ui.allocate_exact_size(egui::Vec2::ZERO, egui::Sense::hover()).1
+            ui.allocate_exact_size(egui::Vec2::ZERO, egui::Sense::hover())
+                .1
         } else {
             // Only take up as much space the aspect ratio requires as to remove
             // letterboxing.
-            let aspect_ratio = self.backend.aspect_ratio().ok().flatten().unwrap_or(16.0 / 9.0);
+            let aspect_ratio = self
+                .backend
+                .aspect_ratio()
+                .ok()
+                .flatten()
+                .unwrap_or(16.0 / 9.0);
 
             let sz = self.player_size(ui, aspect_ratio as f32);
-            let (rect, response) = ui.allocate_exact_size(sz, egui::Sense::FOCUSABLE | egui::Sense::click());
+            let (rect, response) =
+                ui.allocate_exact_size(sz, egui::Sense::FOCUSABLE | egui::Sense::click());
 
             self.show_in_rect(ui, rect, &mut ui_state, player_id);
             response
         };
 
-        ui.ctx().data_mut(|data| data.insert_temp(ui_state_id, ui_state));
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(ui_state_id, ui_state));
         response
     }
 }

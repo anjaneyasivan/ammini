@@ -156,14 +156,7 @@ impl PlayerFsm {
     fn media(&mut self, event: &PlayerEvent) -> Outcome<FsmState> {
         match event {
             PlayerEvent::OpenFile(path) => {
-                if !self.playlist.contains(path) {
-                    self.playlist.push(path.clone());
-                }
-                self.current_index = self
-                    .playlist
-                    .iter()
-                    .position(|p| p == path)
-                    .or(Some(self.playlist.len() - 1));
+                self.current_index = Some(playlist_index_for(&mut self.playlist, path));
 
                 self.persistent.recent_files.retain(|p| p != path);
                 self.persistent.recent_files.insert(0, path.clone());
@@ -175,10 +168,7 @@ impl PlayerFsm {
             PlayerEvent::OpenUrl(url) => {
                 if let Some(proxy_url) = &self.proxy_url {
                     let local = local_url_for(proxy_url, url);
-                    if !self.playlist.contains(&local) {
-                        self.playlist.push(local.clone());
-                    }
-                    self.current_index = Some(self.playlist.len() - 1);
+                    self.current_index = Some(playlist_index_for(&mut self.playlist, &local));
                     sync_persistent_playlist(self);
                     load_media(self, local)
                 } else {
@@ -188,10 +178,7 @@ impl PlayerFsm {
                 }
             }
             PlayerEvent::OpenTelegramUrl(url) => {
-                if !self.playlist.contains(url) {
-                    self.playlist.push(url.clone());
-                }
-                self.current_index = Some(self.playlist.len() - 1);
+                self.current_index = Some(playlist_index_for(&mut self.playlist, url));
                 sync_persistent_playlist(self);
                 load_media(self, url.clone())
             }
@@ -334,6 +321,19 @@ fn sync_persistent_playlist(fsm: &mut PlayerFsm) {
     fsm.persistent.current_index = fsm.current_index;
 }
 
+/// Append `path` to the playlist if absent and return its index. Reusing an existing
+/// entry matters: a replayed Telegram URL (same proxy port) or a reopened file must
+/// select *that* entry, not the last one, or the cache overlay and Next/Previous would
+/// key off the wrong track.
+fn playlist_index_for(playlist: &mut Vec<String>, path: &str) -> usize {
+    if let Some(index) = playlist.iter().position(|p| p == path) {
+        index
+    } else {
+        playlist.push(path.to_owned());
+        playlist.len() - 1
+    }
+}
+
 impl PlayerFsm {
     /// Write the current position to `persistent.resume` (throttled, local files only).
     fn record_resume_position(&mut self) {
@@ -435,8 +435,8 @@ pub fn record_recent_telegram(recent: &mut Vec<RecentTelegram>, entry: RecentTel
 #[cfg(test)]
 mod tests {
     use super::{
-        RecentTelegram, record_recent_file, record_recent_telegram, resume_key, resume_offset,
-        track_label,
+        RecentTelegram, playlist_index_for, record_recent_file, record_recent_telegram, resume_key,
+        resume_offset, track_label,
     };
     use grammers_session::types::{PeerAuth, PeerId, PeerRef};
     use std::collections::HashMap;
@@ -460,6 +460,15 @@ mod tests {
         assert_eq!(recent, vec!["b.mp4", "a.mp4"]);
         record_recent_file(&mut recent, "c.mp4");
         assert_eq!(recent, vec!["c.mp4", "b.mp4", "a.mp4"]);
+    }
+
+    #[test]
+    fn playlist_index_for_reuses_an_existing_entry() {
+        let mut playlist = vec!["a.mp4".to_owned(), "b.mp4".to_owned()];
+        assert_eq!(playlist_index_for(&mut playlist, "b.mp4"), 1);
+        assert_eq!(playlist, vec!["a.mp4", "b.mp4"], "no duplicate pushed");
+        assert_eq!(playlist_index_for(&mut playlist, "c.mp4"), 2);
+        assert_eq!(playlist, vec!["a.mp4", "b.mp4", "c.mp4"]);
     }
 
     #[test]

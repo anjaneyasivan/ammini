@@ -347,13 +347,14 @@ impl AmminiApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
             }
             // Arrow keys seek (matching the widget's keybinds, keyframe-relative)
-            // so they work even when the video surface was never focused.
-            if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight))
+            // so they work even when the video surface was never focused. Command+arrow
+            // is reserved for previous/next track, so those don't seek here.
+            if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) && !i.modifiers.command)
                 && let Err(e) = self.player_mut().seek_relative(10.0)
             {
                 tracing::warn!("failed to seek forward: {e}");
             }
-            if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft))
+            if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft) && !i.modifiers.command)
                 && let Err(e) = self.player_mut().seek_relative(-10.0)
             {
                 tracing::warn!("failed to seek backward: {e}");

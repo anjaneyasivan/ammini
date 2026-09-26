@@ -3,3 +3,10 @@
 
 /dist
 .DS_Store
+
+# ZCode tool artifacts (local plans + ignore list)
+.zcode/
+.zcodeignore
+
+# Scratch eframe sandbox binary
+eframe_window

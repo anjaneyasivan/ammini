@@ -165,6 +165,10 @@ When the video surface has keyboard focus, the mpv overlay controls apply instea
   work like a local file. Played videos appear under **Recent → Recent Telegram files**
   and can be replayed from there at any time (the message is refetched on demand, so
   this survives restarts and chat switches).
+- **New messages arrive live**: incoming messages are appended to the open chat and
+  refresh the chat list (preview + move-to-top) without any refresh action. Updates are
+  requested with catch-up enabled, so messages received while the app was closed show up
+  too. Edits and deletions are not surfaced.
 - Telegram videos are cached under `~/Library/Caches/min-mpv/telegram_cache/`
   (`{chat_id}_{msg_id}.bin` + a manifest). The cache is reused across restarts and
   swept automatically (files older than 30 days, or the oldest files beyond a 2 GiB

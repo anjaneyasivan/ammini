@@ -26,6 +26,12 @@ pub enum TelegramEvent {
     DialogsLoaded(Vec<DialogInfo>, bool, bool),
     /// Messages loaded for a chat. (messages, has_more, replace)
     MessagesLoaded(Vec<MessageInfo>, bool, bool),
+    /// A new message arrived live for `chat_id` (from the updates listener). Boxed so a
+    /// single live message doesn't inflate every `TelegramEvent`.
+    MessageReceived {
+        chat_id: i64,
+        message: Box<MessageInfo>,
+    },
     /// A chat was selected from the list.
     ChatSelected(PeerRef),
     /// Go back to chat list from message view.
@@ -79,7 +85,16 @@ impl TelegramData {
     fn update_messages(&mut self, messages: &[MessageInfo], has_more: bool, replace: bool) {
         if replace {
             // API returns newest-first; store oldest-first for display.
-            self.messages = messages.iter().rev().cloned().collect();
+            let mut page: Vec<MessageInfo> = messages.iter().rev().cloned().collect();
+            // A live message may have landed while this page was being fetched; the page
+            // wouldn't contain it, so keep anything newer than the page's newest message.
+            let newest_page_id = page.last().map_or(0, |m| m.id);
+            for existing in &self.messages {
+                if existing.id > newest_page_id && !page.iter().any(|m| m.id == existing.id) {
+                    page.push(existing.clone());
+                }
+            }
+            self.messages = page;
         } else {
             // Older pages arrive newest-first; prepend them in reversed order.
             let mut older: Vec<MessageInfo> = messages.iter().rev().cloned().collect();
@@ -87,6 +102,59 @@ impl TelegramData {
             self.messages = older;
         }
         self.has_more_messages = has_more;
+    }
+
+    /// Handle one live message: refresh the chat-list preview and, when it belongs to
+    /// the open chat, append it (deduped, oldest-first).
+    fn receive_message(&mut self, chat_id: i64, message: MessageInfo) {
+        self.bump_dialog(chat_id, &message);
+        if self
+            .selected_chat
+            .is_some_and(|peer| peer.id.bot_api_dialog_id() == Some(chat_id))
+        {
+            push_message(&mut self.messages, message);
+        }
+    }
+
+    /// Move the chat to the top of the list with an updated preview, Telegram-style.
+    fn bump_dialog(&mut self, chat_id: i64, message: &MessageInfo) {
+        let Some(index) = self
+            .dialogs
+            .iter()
+            .position(|d| d.peer_ref.id.bot_api_dialog_id() == Some(chat_id))
+        else {
+            return;
+        };
+        let mut dialog = self.dialogs.remove(index);
+        dialog.last_message = Some(dialog_preview(message));
+        self.dialogs.insert(0, dialog);
+    }
+}
+
+/// Insert `message` keeping the list oldest-first, replacing an entry with the same id.
+/// Live updates and paginated fetches overlap, so dedup by message id is required.
+fn push_message(messages: &mut Vec<MessageInfo>, message: MessageInfo) {
+    if let Some(existing) = messages.iter_mut().find(|m| m.id == message.id) {
+        *existing = message;
+        return;
+    }
+    let pos = messages
+        .iter()
+        .position(|m| m.id > message.id)
+        .unwrap_or(messages.len());
+    messages.insert(pos, message);
+}
+
+/// One-line chat-list preview for a message: caption text, else the file name.
+fn dialog_preview(message: &MessageInfo) -> String {
+    let text = message.text.trim();
+    if !text.is_empty() {
+        return text.to_owned();
+    }
+    match &message.media {
+        Some(media) => media.file_name.clone(),
+        None if message.has_video => "Video".to_owned(),
+        None => "(media)".to_owned(),
     }
 }
 
@@ -250,6 +318,10 @@ impl TelegramFsm {
                     .map(|d| d.name.clone());
                 Transition(TelegramState::message_list())
             }
+            TelegramEvent::MessageReceived { chat_id, message } => {
+                self.data.receive_message(*chat_id, (**message).clone());
+                Handled
+            }
             TelegramEvent::SignOut | TelegramEvent::NeedsAuth => {
                 self.data.clear();
                 Transition(TelegramState::unauthenticated())
@@ -267,6 +339,10 @@ impl TelegramFsm {
         match event {
             TelegramEvent::MessagesLoaded(messages, has_more, replace) => {
                 self.data.update_messages(messages, *has_more, *replace);
+                Handled
+            }
+            TelegramEvent::MessageReceived { chat_id, message } => {
+                self.data.receive_message(*chat_id, (**message).clone());
                 Handled
             }
             TelegramEvent::VideoLoading(msg_id) => {
@@ -336,6 +412,10 @@ pub fn ui_message_to_event(msg: &crate::telegram::UiMessage) -> Option<TelegramE
             has_more,
             replace,
         } => TelegramEvent::MessagesLoaded(messages.clone(), *has_more, *replace),
+        UiMessage::MessageReceived { chat_id, message } => TelegramEvent::MessageReceived {
+            chat_id: *chat_id,
+            message: Box::new(message.clone()),
+        },
         UiMessage::Error(e) => TelegramEvent::Error(e.clone()),
         UiMessage::VideoError(e) => TelegramEvent::VideoError(e.clone()),
         UiMessage::VideoReady { .. } => TelegramEvent::VideoReady,
@@ -352,7 +432,10 @@ pub fn ui_message_to_event(msg: &crate::telegram::UiMessage) -> Option<TelegramE
 
 #[cfg(test)]
 mod tests {
-    use super::{TelegramData, TelegramEvent, TelegramFsm, TelegramState, ui_message_to_event};
+    use super::{
+        TelegramData, TelegramEvent, TelegramFsm, TelegramState, push_message, ui_message_to_event,
+    };
+    use crate::telegram::MediaMeta;
     use crate::telegram::UiMessage;
     use crate::telegram::client::{DialogInfo, MessageInfo, PeerRef};
     use grammers_session::types::{PeerAuth, PeerId};
@@ -472,5 +555,81 @@ mod tests {
             3,
             "dialogs must survive into the chat list"
         );
+    }
+
+    fn ids(messages: &[MessageInfo]) -> Vec<i32> {
+        messages.iter().map(|m| m.id).collect()
+    }
+
+    #[test]
+    fn push_message_dedupes_and_keeps_oldest_first() {
+        let mut messages = vec![msg(1), msg(3)];
+        push_message(&mut messages, msg(2));
+        assert_eq!(ids(&messages), vec![1, 2, 3]);
+
+        let mut updated = msg(2);
+        updated.text = "edited".to_owned();
+        push_message(&mut messages, updated);
+        assert_eq!(ids(&messages), vec![1, 2, 3], "no duplicate id");
+        assert_eq!(messages[1].text, "edited");
+    }
+
+    #[test]
+    fn live_message_appends_to_open_chat_and_bumps_preview() {
+        let open = peer_ref(42);
+        let other = peer_ref(7);
+        let mut data = TelegramData::default();
+        data.dialogs = vec![
+            DialogInfo {
+                peer_ref: other,
+                name: "Other".to_owned(),
+                last_message: Some("old".to_owned()),
+            },
+            DialogInfo {
+                peer_ref: open,
+                name: "Open".to_owned(),
+                last_message: None,
+            },
+        ];
+        data.selected_chat = Some(open);
+
+        let mut incoming = msg(10);
+        incoming.text = "hello".to_owned();
+        data.receive_message(open.id.bot_api_dialog_id().unwrap(), incoming);
+
+        assert_eq!(ids(&data.messages), vec![10], "appended to the open chat");
+        assert_eq!(data.dialogs[0].name, "Open", "chat bumped to the top");
+        assert_eq!(data.dialogs[0].last_message.as_deref(), Some("hello"));
+
+        // A message for another chat bumps that dialog only — never the open list.
+        data.receive_message(other.id.bot_api_dialog_id().unwrap(), msg(11));
+        assert_eq!(ids(&data.messages), vec![10]);
+        assert_eq!(data.dialogs[0].name, "Other");
+    }
+
+    #[test]
+    fn captionless_video_previews_use_the_file_name() {
+        let mut incoming = msg(12);
+        incoming.text = String::new();
+        incoming.has_video = true;
+        incoming.media = Some(MediaMeta::parse("Show.S01E01.1080p.mkv"));
+        assert_eq!(
+            super::dialog_preview(&incoming),
+            "Show.S01E01.1080p.mkv",
+            "a caption-less video shows the file name in the chat list"
+        );
+    }
+
+    #[test]
+    fn replace_page_keeps_a_live_message_that_arrived_during_the_fetch() {
+        let chat = peer_ref(5);
+        let chat_id = chat.id.bot_api_dialog_id().unwrap();
+        let mut data = TelegramData::default();
+        data.selected_chat = Some(chat);
+        // A live message (id 10) lands before the select-chat page (newest id 9) is applied.
+        data.receive_message(chat_id, msg(10));
+        // Page arrives newest-first, as the API returns it, without id 10.
+        data.update_messages(&[msg(9), msg(8)], false, true);
+        assert_eq!(ids(&data.messages), vec![8, 9, 10]);
     }
 }

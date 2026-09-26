@@ -10,7 +10,9 @@ use grammers_client::client::Client;
 use grammers_client::peer::User;
 use grammers_client::sender::SenderPool;
 use grammers_session::storages::SqliteSession;
+use grammers_session::updates::UpdatesLike;
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::telegram::config::TelegramConfig;
 use crate::telegram::media_meta::MediaMeta;
@@ -19,6 +21,9 @@ use crate::telegram::media_meta::MediaMeta;
 pub const DIALOG_PAGE_SIZE: usize = 20;
 /// How many messages to fetch per page.
 pub const MESSAGE_PAGE_SIZE: usize = 50;
+
+/// The sender pool's raw update channel, handed to the realtime listener.
+pub type UpdatesReceiver = UnboundedReceiver<UpdatesLike>;
 
 /// File extensions treated as playable video. Some files (e.g. `.mkv` sent as a plain
 /// attachment) carry no Telegram video attributes, so we fall back on the file name.
@@ -31,16 +36,26 @@ pub struct TelegramClient {
 }
 
 impl TelegramClient {
-    pub async fn connect(config: &TelegramConfig, session: Arc<SqliteSession>) -> Result<Self> {
+    pub async fn connect(
+        config: &TelegramConfig,
+        session: Arc<SqliteSession>,
+    ) -> Result<(Self, UpdatesReceiver)> {
         tracing::debug!("tg: connecting (api_id={})", config.api_id);
-        let pool = SenderPool::new(session, config.api_id);
-        let client = Client::new(pool.handle);
-        tokio::spawn(pool.runner.run());
+        let SenderPool {
+            runner,
+            handle,
+            updates,
+        } = SenderPool::new(session, config.api_id);
+        let client = Client::new(handle);
+        tokio::spawn(runner.run());
         tracing::debug!("tg: connected, runner spawned");
-        Ok(Self {
-            client,
-            api_hash: config.api_hash.clone(),
-        })
+        Ok((
+            Self {
+                client,
+                api_hash: config.api_hash.clone(),
+            },
+            updates,
+        ))
     }
 
     pub async fn is_authorized(&self) -> Result<bool> {
@@ -356,7 +371,7 @@ fn map_dialog(dialog: &grammers_client::peer::Dialog) -> DialogInfo {
     }
 }
 
-fn map_message(
+pub(crate) fn map_message(
     msg: &grammers_client::message::Message,
     chat_id: i64,
     self_user_id: Option<i64>,

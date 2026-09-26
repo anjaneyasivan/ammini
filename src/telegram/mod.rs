@@ -7,8 +7,11 @@ pub mod proxy;
 pub mod session;
 pub mod state_machine;
 
+mod updates;
+
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -41,6 +44,13 @@ pub enum UiMessage {
         messages: Vec<MessageInfo>,
         has_more: bool,
         replace: bool,
+    },
+    /// A new message arrived live on the account (from the updates listener). The UI
+    /// appends it to the open chat when `chat_id` matches and refreshes the chat-list
+    /// preview for that chat either way.
+    MessageReceived {
+        chat_id: i64,
+        message: MessageInfo,
     },
     VideoReady {
         msg_id: i32,
@@ -117,7 +127,7 @@ async fn run_telegram(
         }
     };
 
-    let client = match TelegramClient::connect(&config, session).await {
+    let (client, updates) = match TelegramClient::connect(&config, session).await {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("failed to connect to Telegram: {e}");
@@ -131,9 +141,10 @@ async fn run_telegram(
     let mut password_token: Option<grammers_client::client::PasswordToken> = None;
     let mut dialogs_iter: Option<client::DialogIter> = None;
     let mut messages_iter: Option<client::MessageIter> = None;
-    let mut selected_chat_id: Option<i64> = None;
-    // Own account id, for marking own messages (None until known).
-    let mut self_user_id: Option<i64> = None;
+    // Shared with the realtime listener: `0` means "none"/"unknown" (see `UNSET`).
+    let selected_chat_id = Arc::new(AtomicI64::new(0));
+    // Own account id, for marking own messages (0 until known).
+    let self_user_id = Arc::new(AtomicI64::new(0));
 
     let video_registry: Arc<tokio::sync::Mutex<HashMap<i32, client::VideoDownloadInfo>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
@@ -210,7 +221,9 @@ async fn run_telegram(
     match client.is_authorized().await {
         Ok(true) => {
             tracing::info!("telegram: already authorized");
-            self_user_id = client::self_user_id(&client).await;
+            if let Some(id) = client::self_user_id(&client).await {
+                self_user_id.store(id, Ordering::Relaxed);
+            }
             crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramSignedIn);
             if let Some((name, phone)) = client::self_user_identity(&client).await {
                 crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramUserIdentified {
@@ -243,6 +256,19 @@ async fn run_telegram(
         }
     }
 
+    // Realtime message updates run on their own task so the command loop below stays a
+    // plain dispatcher. Started after the initial dialog fetch above so channel peer
+    // hashes are cached before caught-up updates need them to resolve gaps. The listener
+    // only sends `UiMessage`s; the shared state it reads is written by the loop below.
+    updates::spawn_listener(
+        client.clone(),
+        updates,
+        self_user_id.clone(),
+        selected_chat_id.clone(),
+        video_registry.clone(),
+        ui_tx.clone(),
+    );
+
     while let Some(command) = bg_rx.recv().await {
         match command {
             BgCommand::SubmitPhone(phone) => match client.request_login_code(&phone).await {
@@ -271,7 +297,7 @@ async fn run_telegram(
                             "telegram: signed in (user {})",
                             user.id().bare_id_unchecked()
                         );
-                        self_user_id = Some(user.id().bare_id_unchecked());
+                        self_user_id.store(user.id().bare_id_unchecked(), Ordering::Relaxed);
                         crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramSignedIn);
                         if let Some((name, phone)) = client::user_identity(&user) {
                             crate::telemetry::emit(
@@ -332,7 +358,7 @@ async fn run_telegram(
                 match client.check_password(pw_token, password).await {
                     Ok(user) => {
                         tracing::info!("telegram: 2FA ok (user {})", user.id().bare_id_unchecked());
-                        self_user_id = Some(user.id().bare_id_unchecked());
+                        self_user_id.store(user.id().bare_id_unchecked(), Ordering::Relaxed);
                         crate::telemetry::emit(crate::telemetry::TelemetryEvent::TelegramSignedIn);
                         if let Some((name, phone)) = client::user_identity(&user) {
                             crate::telemetry::emit(
@@ -406,7 +432,7 @@ async fn run_telegram(
             }
             BgCommand::SelectChat(peer_ref) => {
                 let chat_id = peer_ref.id.bot_api_dialog_id().unwrap_or(0);
-                selected_chat_id = Some(chat_id);
+                selected_chat_id.store(chat_id, Ordering::Relaxed);
                 video_registry.lock().await.clear();
                 video_cache.lock().await.clear();
 
@@ -415,7 +441,7 @@ async fn run_telegram(
                     &mut iter,
                     client::MESSAGE_PAGE_SIZE,
                     chat_id,
-                    self_user_id,
+                    nonzero(self_user_id.load(Ordering::Relaxed)),
                 )
                 .await
                 {
@@ -439,16 +465,16 @@ async fn run_telegram(
                 }
             }
             BgCommand::LoadMoreMessages => {
-                let chat_id = match selected_chat_id {
-                    Some(id) => id,
-                    None => continue,
-                };
+                let chat_id = selected_chat_id.load(Ordering::Relaxed);
+                if chat_id == 0 {
+                    continue;
+                }
                 if let Some(iter) = messages_iter.as_mut() {
                     match client::next_messages_page(
                         iter,
                         client::MESSAGE_PAGE_SIZE,
                         chat_id,
-                        self_user_id,
+                        nonzero(self_user_id.load(Ordering::Relaxed)),
                     )
                     .await
                     {
@@ -473,7 +499,7 @@ async fn run_telegram(
             }
             BgCommand::BackToChatList => {
                 messages_iter = None;
-                selected_chat_id = None;
+                selected_chat_id.store(0, Ordering::Relaxed);
                 video_registry.lock().await.clear();
                 video_cache.lock().await.clear();
             }
@@ -540,7 +566,7 @@ async fn run_telegram(
                 tracing::info!("telegram: signing out");
                 dialogs_iter = None;
                 messages_iter = None;
-                selected_chat_id = None;
+                selected_chat_id.store(0, Ordering::Relaxed);
                 video_registry.lock().await.clear();
                 video_cache.lock().await.clear();
                 login_token = None;
@@ -593,6 +619,12 @@ fn video_meta(document: &client::Document) -> crate::telemetry::VideoMeta {
 pub fn telegram_url_msg_id(url: &str) -> Option<i32> {
     let rest = url.split_once("/telegram/")?.1;
     rest.split('/').next()?.parse().ok()
+}
+
+/// `0` is the "unset" sentinel for the shared `AtomicI64`s (own user id / selected
+/// chat id) used between the command loop and the realtime updates listener.
+fn nonzero(value: i64) -> Option<i64> {
+    (value != 0).then_some(value)
 }
 
 #[cfg(test)]

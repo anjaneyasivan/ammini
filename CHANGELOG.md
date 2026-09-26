@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/anjaneyasivan/ammini/compare/v0.1.0...v0.1.1) - 2026-09-26
+
+### Added
+
+- media-card video bubbles and Telegram resume positions
+
+### Fixed
+
+- keep arrow-key seek working after the first press
+- single window fullscreen — F toggles it, Esc leaves it
+
+### Other
+
+- add Windows support research and plan
+- ignore ZCode artifacts and the eframe sandbox
+
 ## [0.1.0](https://github.com/anjaneyasivan/ammini/releases/tag/v0.1.0) - 2026-09-24
 
 ### Added

@@ -13,6 +13,7 @@ use grammers_session::storages::SqliteSession;
 use std::sync::Arc;
 
 use crate::telegram::config::TelegramConfig;
+use crate::telegram::media_meta::MediaMeta;
 
 /// How many dialogs to fetch per page.
 pub const DIALOG_PAGE_SIZE: usize = 20;
@@ -375,6 +376,15 @@ fn map_message(
 
     let (has_video, video) = extract_video(msg, chat_id);
 
+    // Parse the file name once here (background thread) so the UI never re-parses per
+    // frame; the document supplies the size/duration the parser can't know.
+    let media = video.as_ref().map(|v| {
+        let mut media = MediaMeta::parse(v.document.name().unwrap_or("video"));
+        media.size_bytes = v.document.size().map(|s| s as u64);
+        media.duration_secs = v.document.duration();
+        media
+    });
+
     (
         MessageInfo {
             id: msg.id(),
@@ -383,6 +393,7 @@ fn map_message(
             text,
             time,
             has_video,
+            media,
         },
         video,
     )
@@ -512,6 +523,9 @@ pub struct MessageInfo {
     pub text: String,
     pub time: String,
     pub has_video: bool,
+    /// Presentation metadata for a video attachment (parsed file name + document size
+    /// and duration). `None` for messages without a playable video.
+    pub media: Option<MediaMeta>,
 }
 
 /// Everything needed to download a video from a Telegram message.

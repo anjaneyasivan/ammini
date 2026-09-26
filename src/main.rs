@@ -215,6 +215,17 @@ impl AmminiApp {
         unsafe { &mut self.fsm.inner_mut().status }
     }
 
+    /// Record the current playback offset (and pin the local file at the front of the
+    /// recent list) immediately before a keyboard quit. `App::save` does this too, but
+    /// doing it on the keypress guarantees the resume map is up to date regardless of
+    /// how eframe tears the window down (Cmd+Q on macOS reaches `Event::LoopExiting`
+    /// rather than the normal close path).
+    fn record_session_before_close(&mut self) {
+        // SAFETY: `finalize_session` touches only plain UI data (resume map, recent
+        // files) and reads the playback position — no state-machine invariants.
+        unsafe { self.fsm.inner_mut().finalize_session() };
+    }
+
     fn open_file_dialog(&self) -> Option<PlayerEvent> {
         FileDialog::new()
             .add_filter("Video files", VIDEO_EXTS)
@@ -276,10 +287,12 @@ impl AmminiApp {
         // the same save-on-exit path; this keeps Cmd+W (no menu item) and non-macOS
         // builds working too.
         if ctx.input(|i| i.key_pressed(egui::Key::W) && i.modifiers.command) {
+            self.record_session_before_close();
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Q) && i.modifiers.command) {
+            self.record_session_before_close();
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }

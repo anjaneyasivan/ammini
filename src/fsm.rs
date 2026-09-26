@@ -272,18 +272,40 @@ fn load_media(fsm: &mut PlayerFsm, path: String) -> Outcome<FsmState> {
     }
 }
 
-/// The offset to resume `path` from, if any. Local files only (proxy URLs are
-/// session-scoped), and only when the saved position is above `RESUME_MIN_SECONDS` —
-/// anything smaller is not worth resuming.
+/// The offset to resume `path` from, if any, and only when the saved position is above
+/// `RESUME_MIN_SECONDS` — anything smaller is not worth resuming.
 fn resume_offset(resume: &HashMap<String, f64>, path: &str) -> Option<f64> {
+    let key = resume_key(path)?;
+    resume
+        .get(&key)
+        .copied()
+        .filter(|&p| p > RESUME_MIN_SECONDS)
+}
+
+/// Stable key for the `resume` map. Local files key by their path; Telegram proxy URLs
+/// are session-scoped (the proxy port changes every launch), so they key by the video's
+/// message id as `telegram:{msg_id}` — the same per-message identity the proxy registry
+/// and disk cache use. Any other remote URL has no stable identity and is not resumable.
+fn resume_key(path: &str) -> Option<String> {
+    if let Some(key) = telegram_resume_key(path) {
+        return Some(key);
+    }
     if path.starts_with("http") {
         None
     } else {
-        resume
-            .get(path)
-            .copied()
-            .filter(|&p| p > RESUME_MIN_SECONDS)
+        Some(path.to_owned())
     }
+}
+
+/// The resume key for a Telegram video proxy URL, or `None` for anything else. Only local
+/// proxy URLs count: a generic `/url?url=…` proxy could embed a `/telegram/…` path in its
+/// query, which must not be mistaken for a Telegram video.
+fn telegram_resume_key(path: &str) -> Option<String> {
+    let (head, _query) = path.split_once('?').unwrap_or((path, ""));
+    if !head.starts_with("http://127.0.0.1:") && !head.starts_with("http://localhost:") {
+        return None;
+    }
+    crate::telegram::telegram_url_msg_id(head).map(|msg_id| format!("telegram:{msg_id}"))
 }
 
 /// Attribute a media path to the source it came from. Playlist replays re-enter
@@ -326,10 +348,10 @@ impl PlayerFsm {
         self.record_current_position();
     }
 
-    /// Write the current playback position to `persistent.resume` (local files only),
-    /// unthrottled. The `playing` state goes through the throttled
-    /// `record_resume_position`; `finalize_session` calls this directly on quit so the
-    /// saved offset is never stale.
+    /// Write the current playback position to `persistent.resume` (unthrottled). The
+    /// `playing` state goes through the throttled `record_resume_position`;
+    /// `finalize_session` calls this directly on quit so the saved offset is never stale.
+    /// Covers local files and Telegram videos (keyed by message id — see `resume_key`).
     fn record_current_position(&mut self) {
         let Some(path) = self
             .current_index
@@ -338,9 +360,9 @@ impl PlayerFsm {
         else {
             return;
         };
-        if path.starts_with("http") {
+        let Some(key) = resume_key(&path) else {
             return;
-        }
+        };
         let Ok(Some(pos)) = self.player.time_pos() else {
             return;
         };
@@ -350,13 +372,14 @@ impl PlayerFsm {
         if self.persistent.resume.len() >= RESUME_MAX_ENTRIES {
             self.persistent.resume.clear();
         }
-        self.persistent.resume.insert(path, pos);
+        self.persistent.resume.insert(key, pos);
     }
 
     /// Finalize the session before the state is persisted (called from `App::save`,
     /// so it runs on Cmd+W/Cmd+Q/the close button and every autosave): record the
     /// current playing offset unthrottled and pin the current file in the recent list.
-    /// Local files only.
+    /// The offset is recorded for local files and Telegram videos; only local files are
+    /// added to the recent-files list (Telegram has its own).
     pub fn finalize_session(&mut self) {
         self.record_current_position();
         let Some(path) = self
@@ -412,7 +435,8 @@ pub fn record_recent_telegram(recent: &mut Vec<RecentTelegram>, entry: RecentTel
 #[cfg(test)]
 mod tests {
     use super::{
-        RecentTelegram, record_recent_file, record_recent_telegram, resume_offset, track_label,
+        RecentTelegram, record_recent_file, record_recent_telegram, resume_key, resume_offset,
+        track_label,
     };
     use grammers_session::types::{PeerAuth, PeerId, PeerRef};
     use std::collections::HashMap;
@@ -460,13 +484,46 @@ mod tests {
     #[test]
     fn resume_offset_skips_remote_and_tiny_positions() {
         let mut resume = HashMap::new();
-        resume.insert("http://127.0.0.1:8080/telegram/3".into(), 9.0);
+        resume.insert("http://example.com/movie.mp4".into(), 9.0);
         resume.insert("/videos/b.mp4".into(), 2.0); // below RESUME_MIN_SECONDS
+        assert_eq!(resume_offset(&resume, "http://example.com/movie.mp4"), None);
+        assert_eq!(resume_offset(&resume, "/videos/b.mp4"), None);
+    }
+
+    #[test]
+    fn telegram_resume_survives_proxy_port_change() {
+        // Proxy URLs are session-scoped: the port changes every launch, so the key must
+        // ignore it and follow the message id.
+        let mut resume = HashMap::new();
+        resume.insert("telegram:12345".into(), 612.0);
         assert_eq!(
-            resume_offset(&resume, "http://127.0.0.1:8080/telegram/3"),
+            resume_offset(&resume, "http://127.0.0.1:51482/telegram/12345"),
+            Some(612.0)
+        );
+        assert_eq!(
+            resume_offset(&resume, "http://127.0.0.1:64353/telegram/12345"),
+            Some(612.0)
+        );
+        // A different message is a different key.
+        assert_eq!(
+            resume_offset(&resume, "http://127.0.0.1:51482/telegram/999"),
             None
         );
-        assert_eq!(resume_offset(&resume, "/videos/b.mp4"), None);
+    }
+
+    #[test]
+    fn resume_key_classifies_local_remote_and_telegram() {
+        assert_eq!(resume_key("/videos/a.mp4"), Some("/videos/a.mp4".into()));
+        assert_eq!(resume_key("http://example.com/a.mp4"), None);
+        assert_eq!(
+            resume_key("http://127.0.0.1:51482/telegram/12345"),
+            Some("telegram:12345".into())
+        );
+        // A generic URL proxy whose query embeds a /telegram/ path is not a Telegram video.
+        assert_eq!(
+            resume_key("http://127.0.0.1:8080/url?url=http://127.0.0.1:9/telegram/5"),
+            None
+        );
     }
 
     #[test]

@@ -92,6 +92,58 @@ pub fn bubble_other(dark: bool) -> Color32 {
     }
 }
 
+/// Outline for a bubble/card border. On an accent bubble a white hairline reads;
+/// otherwise it is a faint edge derived from the theme.
+pub fn bubble_stroke(on_accent: bool, dark: bool) -> Color32 {
+    if on_accent {
+        Color32::from_white_alpha(0x33)
+    } else if dark {
+        Color32::from_white_alpha(0x1A)
+    } else {
+        Color32::from_black_alpha(0x14)
+    }
+}
+
+/// Fill for a metadata chip (quality/encoding tag) inside a bubble.
+pub fn chip_fill(on_accent: bool, dark: bool) -> Color32 {
+    if on_accent {
+        Color32::from_white_alpha(0x1E)
+    } else if dark {
+        Color32::from_white_alpha(0x0F)
+    } else {
+        Color32::from_black_alpha(0x08)
+    }
+}
+
+/// Outline for a metadata chip.
+pub fn chip_outline(on_accent: bool, dark: bool) -> Color32 {
+    if on_accent {
+        Color32::from_white_alpha(0x3D)
+    } else if dark {
+        Color32::from_white_alpha(0x24)
+    } else {
+        Color32::from_black_alpha(0x1A)
+    }
+}
+
+/// Text color for a metadata chip.
+pub fn chip_text(on_accent: bool, dark: bool) -> Color32 {
+    if on_accent {
+        Color32::from_white_alpha(0xE0)
+    } else {
+        text_primary(dark)
+    }
+}
+
+/// "Ready" status (emerald) for a video card — theme-aware.
+pub fn status_ready(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(52, 199, 120)
+    } else {
+        Color32::from_rgb(16, 140, 90)
+    }
+}
+
 /// Muted avatar background derived from the contact name, so each chat gets its own
 /// soft hue while staying desaturated (no saturated colors outside the accent).
 pub fn avatar_fill(name: &str) -> Color32 {

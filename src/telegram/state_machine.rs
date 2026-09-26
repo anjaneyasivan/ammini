@@ -366,6 +366,7 @@ mod tests {
             text: format!("msg {id}"),
             time: String::new(),
             has_video: false,
+            media: None,
         }
     }
 

@@ -23,8 +23,9 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::fonts::{icon_label, icon_label_colored, icon_only};
 use crate::style;
+use crate::telegram::media_meta::{format_bytes, format_duration};
 use crate::telegram::state_machine::{TelegramData, TelegramEvent, TelegramFsm, TelegramState};
-use crate::telegram::{BgCommand, DialogInfo, MessageInfo};
+use crate::telegram::{BgCommand, DialogInfo, MediaMeta, MessageInfo};
 use statig::blocking::StateMachine;
 
 /// Height of a chat-list row (avatar + two lines of text).
@@ -35,6 +36,27 @@ const AVATAR_SIZE: f32 = 40.0;
 const ROW_PADDING: f32 = 12.0;
 /// Widest a message bubble may grow, as a fraction of the conversation width.
 const BUBBLE_MAX_WIDTH: f32 = 0.72;
+
+/// Video availability shown on a media card, derived from the Telegram FSM state.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VideoStatus {
+    /// Not the current video: playable.
+    Ready,
+    /// The current video is still being prepared.
+    Loading,
+    /// The current video is playing.
+    Playing,
+}
+
+impl VideoStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "Ready",
+            Self::Loading => "Preparing…",
+            Self::Playing => "Playing",
+        }
+    }
+}
 
 /// Sidebar widget for the Telegram chat UI.
 pub struct TelegramPanel {
@@ -442,9 +464,16 @@ impl TelegramPanel {
                             ui.add_space(3.0);
                         }
 
-                        let loading =
-                            fsm.data.loading_video && fsm.data.current_video == Some(msg.id);
-                        if Self::message_bubble(ui, msg, dark, loading) {
+                        let status = if fsm.data.current_video == Some(msg.id) {
+                            if fsm.data.loading_video {
+                                VideoStatus::Loading
+                            } else {
+                                VideoStatus::Playing
+                            }
+                        } else {
+                            VideoStatus::Ready
+                        };
+                        if Self::message_bubble(ui, msg, dark, status) {
                             play_msg = Some(msg.id);
                         }
 
@@ -544,8 +573,15 @@ impl TelegramPanel {
     }
 
     /// One message: a filled bubble, left for others and right for your own
-    /// messages. Returns `true` when its play button was clicked.
-    fn message_bubble(ui: &mut egui::Ui, msg: &MessageInfo, dark: bool, loading: bool) -> bool {
+    /// messages. Video attachments render as a media card (size/status, title,
+    /// quality chips, original file name). Returns `true` when a play button was
+    /// clicked.
+    fn message_bubble(
+        ui: &mut egui::Ui,
+        msg: &MessageInfo,
+        dark: bool,
+        status: VideoStatus,
+    ) -> bool {
         let is_me = msg.sender_is_self;
         let (fill, text_color) = if is_me {
             (style::ACCENT, Color32::WHITE)
@@ -565,41 +601,163 @@ impl TelegramPanel {
             let max_width = ui.available_width() * BUBBLE_MAX_WIDTH;
             egui::Frame::new()
                 .fill(fill)
+                .stroke(egui::Stroke::new(1.0, style::bubble_stroke(is_me, dark)))
                 .corner_radius(CornerRadius::same(style::BUBBLE_RADIUS))
                 .inner_margin(Margin::symmetric(12, 8))
                 .show(ui, |ui| {
-                    ui.set_max_width(max_width);
-                    if has_text {
-                        ui.add(
-                            egui::Label::new(RichText::new(text).size(14.0).color(text_color))
-                                .wrap(),
-                        );
-                    }
-                    if msg.has_video {
+                    // The Frame's content ui inherits the bubble's horizontal layout, so
+                    // force a top-down stack here — otherwise rows after the first are
+                    // placed in a zero-width column against the edge and wrap per char.
+                    ui.vertical(|ui| {
+                        ui.set_max_width(max_width);
                         if has_text {
-                            ui.add_space(6.0);
+                            ui.add(
+                                egui::Label::new(RichText::new(text).size(14.0).color(text_color))
+                                    .wrap(),
+                            );
                         }
-                        if loading {
-                            ui.horizontal(|ui| {
-                                ui.spinner();
-                                ui.label(
-                                    RichText::new("Loading video…").size(13.0).color(text_color),
-                                );
-                            });
-                        } else if Self::play_button(ui, is_me) {
-                            play_clicked = true;
+                        if msg.has_video {
+                            if has_text {
+                                ui.add_space(8.0);
+                            }
+                            if Self::video_card(
+                                ui,
+                                msg.media.as_ref(),
+                                is_me,
+                                dark,
+                                status,
+                                !has_text,
+                                max_width < 220.0,
+                            ) {
+                                play_clicked = true;
+                            }
                         }
-                    }
+                    });
                 });
         });
 
         play_clicked
     }
 
-    /// Full-width play button for a video bubble. The fill is set per interact
-    /// state in a scoped style, because a plain `Button` repaints a static
-    /// `.fill()` on hover.
-    fn play_button(ui: &mut egui::Ui, on_accent: bool) -> bool {
+    /// The media card for a video attachment. `show_titles` is false when the
+    /// message already has a caption (the caption plays that role; derived title and
+    /// subtitle are skipped to avoid repeating the file name).
+    fn video_card(
+        ui: &mut egui::Ui,
+        media: Option<&MediaMeta>,
+        is_me: bool,
+        dark: bool,
+        status: VideoStatus,
+        show_titles: bool,
+        compact: bool,
+    ) -> bool {
+        let text_color = if is_me {
+            Color32::WHITE
+        } else {
+            style::text_primary(dark)
+        };
+        let secondary = Self::secondary_on(is_me, dark);
+        let status_color = if is_me {
+            Color32::from_white_alpha(0xDD)
+        } else {
+            match status {
+                VideoStatus::Ready => style::status_ready(dark),
+                VideoStatus::Playing => style::ACCENT,
+                VideoStatus::Loading => style::text_secondary(dark),
+            }
+        };
+        let mut play_clicked = false;
+
+        // Header: meta + status on the left, Play pill on the right — the same
+        // horizontal + right-aligned-child pattern as the sender/time header above.
+        ui.horizontal(|ui| {
+            let mut meta = Vec::new();
+            if let Some(m) = media {
+                if let Some(size) = m.size_bytes {
+                    meta.push(format_bytes(size));
+                }
+                if !compact && let Some(dur) = m.duration_secs {
+                    meta.push(format_duration(dur));
+                }
+            }
+            if !meta.is_empty() {
+                ui.label(
+                    RichText::new(meta.join(" · "))
+                        .monospace()
+                        .size(11.0)
+                        .color(secondary),
+                );
+                ui.add_space(4.0);
+            }
+            if status == VideoStatus::Loading {
+                ui.spinner();
+            } else {
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(7.0, 7.0), Sense::hover());
+                ui.painter().circle_filled(rect.center(), 3.5, status_color);
+            }
+            ui.label(RichText::new(status.label()).size(11.0).color(status_color));
+
+            if status != VideoStatus::Loading {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if Self::play_pill(ui, is_me, compact) {
+                        play_clicked = true;
+                    }
+                });
+            }
+        });
+
+        let Some(meta) = media else {
+            return play_clicked;
+        };
+
+        if show_titles {
+            ui.add_space(6.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(&meta.title)
+                        .strong()
+                        .size(14.0)
+                        .color(text_color),
+                )
+                .wrap(),
+            );
+            if let Some(subtitle) = &meta.subtitle {
+                ui.add(
+                    egui::Label::new(RichText::new(subtitle).size(12.5).color(secondary)).wrap(),
+                );
+            }
+        }
+
+        if !meta.chips.is_empty() {
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
+                for chip in &meta.chips {
+                    Self::chip(ui, chip, is_me, dark);
+                }
+            });
+        }
+
+        if !meta.file_name.is_empty() {
+            ui.add_space(5.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(&meta.file_name)
+                        .monospace()
+                        .size(10.5)
+                        .color(secondary),
+                )
+                .truncate(),
+            )
+            .on_hover_text(&meta.file_name);
+        }
+
+        play_clicked
+    }
+
+    /// Compact "Play" pill for a media card's header. `compact` drops the label and
+    /// shows just the icon, for narrow sidebars.
+    fn play_pill(ui: &mut egui::Ui, on_accent: bool, compact: bool) -> bool {
         let (idle, hovered, active) = if on_accent {
             (
                 Color32::from_white_alpha(0x22),
@@ -622,7 +780,14 @@ impl TelegramPanel {
                 )
             }
         };
-        let width = ui.available_width();
+        let (text, min_size) = if compact {
+            (icon_only(ui, ICON_PLAY_ARROW), egui::vec2(30.0, 26.0))
+        } else {
+            (
+                icon_label_colored(ui, ICON_PLAY_ARROW, "Play", Color32::WHITE),
+                egui::vec2(58.0, 26.0),
+            )
+        };
 
         ui.scope(|ui| {
             let widgets = &mut ui.style_mut().visuals.widgets;
@@ -635,19 +800,40 @@ impl TelegramPanel {
                 widget.fg_stroke.color = Color32::WHITE;
             }
             ui.add(
-                egui::Button::new(icon_label_colored(
-                    ui,
-                    ICON_PLAY_ARROW,
-                    "Play",
-                    Color32::WHITE,
-                ))
-                .corner_radius(CornerRadius::same(style::WIDGET_RADIUS))
-                .min_size(egui::vec2(width, 32.0)),
+                egui::Button::new(text)
+                    .corner_radius(CornerRadius::same(style::WIDGET_RADIUS))
+                    .min_size(min_size),
             )
         })
         .inner
         .on_hover_text("Play video")
         .clicked()
+    }
+
+    /// A rounded, bordered metadata chip (quality/encoding tag).
+    fn chip(ui: &mut egui::Ui, label: &str, is_me: bool, dark: bool) {
+        egui::Frame::new()
+            .fill(style::chip_fill(is_me, dark))
+            .stroke(egui::Stroke::new(1.0, style::chip_outline(is_me, dark)))
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(Margin::symmetric(7, 3))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(label)
+                        .monospace()
+                        .size(10.5)
+                        .color(style::chip_text(is_me, dark)),
+                );
+            });
+    }
+
+    /// Secondary text that stays readable on the accent (own-message) fill.
+    fn secondary_on(on_accent: bool, dark: bool) -> Color32 {
+        if on_accent {
+            Color32::from_white_alpha(0xB8)
+        } else {
+            style::text_secondary(dark)
+        }
     }
 
     /// Filled accent button (white text) for a screen's primary action.

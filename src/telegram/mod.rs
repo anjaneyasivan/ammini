@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod client;
 pub mod config;
+pub mod media_meta;
 pub mod panel;
 pub mod proxy;
 pub mod session;
@@ -12,6 +13,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 pub use client::{DialogInfo, MessageInfo, PeerRef};
+pub use media_meta::MediaMeta;
 pub use state_machine::{TelegramEvent, TelegramFsm, TelegramState};
 
 use client::TelegramClient;

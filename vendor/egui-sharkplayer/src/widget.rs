@@ -208,6 +208,17 @@ pub struct SharkPlayer<'a, P: ControlsIconProvider = DefaultControlsIconProvider
 }
 
 impl<'a> SharkPlayer<'a> {
+    /// The id of the focusable player surface the widget creates internally.
+    ///
+    /// Keyboard focus lands on this id (initial focus, click-to-focus, focus
+    /// requested by fullscreen toggling), not on the response returned by
+    /// `Widget::ui` — hosts that need to know whether the video surface is
+    /// focused should check this id.
+    #[must_use]
+    pub fn player_focus_id(ui: &egui::Ui) -> egui::Id {
+        ui.id().with("sharkplayer_player")
+    }
+
     /// Create a new [`SharkPlayer`]. To use a custom icons provider, see
     /// [`SharkPlayer::new_with_icons`].
     #[inline]
@@ -523,6 +534,20 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
         if !player_response.has_focus() {
             return;
         }
+
+        // The player surface consumes the arrow keys (seek + volume), so stop
+        // egui's default focus navigation from moving focus away on the first
+        // press — same pattern as egui's own Slider.
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                player_response.id,
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    ..Default::default() // Tab / Esc keep their default focus behavior
+                },
+            );
+        });
 
         if ui.input(|i| self.keybinds.toggle_pause.iter().any(|&key| i.key_pressed(key))) {
             self.action_toggle_payback(ui, *current_time, duration);

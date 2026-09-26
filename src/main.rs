@@ -333,6 +333,18 @@ impl AmminiApp {
                 let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
             }
+            // Arrow keys seek (matching the widget's keybinds, keyframe-relative)
+            // so they work even when the video surface was never focused.
+            if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight))
+                && let Err(e) = self.player_mut().seek_relative(10.0)
+            {
+                tracing::warn!("failed to seek forward: {e}");
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft))
+                && let Err(e) = self.player_mut().seek_relative(-10.0)
+            {
+                tracing::warn!("failed to seek backward: {e}");
+            }
         }
 
         if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift)
@@ -866,7 +878,9 @@ impl App for AmminiApp {
                     }))
                     .cache_overlay(cache_spans, cache_color),
             );
-            self.video_focus_id = Some(player_response.id);
+            // Focus lands on the widget's internal player surface, not on the
+            // response returned by `Widget::ui` — check that id in `handle_shortcuts`.
+            self.video_focus_id = Some(SharkPlayer::player_focus_id(ui));
 
             // Loading overlay: dim the video and show a spinner while a Telegram
             // file's initial load is still in progress (painted, not a widget, so

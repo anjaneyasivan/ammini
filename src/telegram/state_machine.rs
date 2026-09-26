@@ -578,20 +578,22 @@ mod tests {
     fn live_message_appends_to_open_chat_and_bumps_preview() {
         let open = peer_ref(42);
         let other = peer_ref(7);
-        let mut data = TelegramData::default();
-        data.dialogs = vec![
-            DialogInfo {
-                peer_ref: other,
-                name: "Other".to_owned(),
-                last_message: Some("old".to_owned()),
-            },
-            DialogInfo {
-                peer_ref: open,
-                name: "Open".to_owned(),
-                last_message: None,
-            },
-        ];
-        data.selected_chat = Some(open);
+        let mut data = TelegramData {
+            dialogs: vec![
+                DialogInfo {
+                    peer_ref: other,
+                    name: "Other".to_owned(),
+                    last_message: Some("old".to_owned()),
+                },
+                DialogInfo {
+                    peer_ref: open,
+                    name: "Open".to_owned(),
+                    last_message: None,
+                },
+            ],
+            selected_chat: Some(open),
+            ..Default::default()
+        };
 
         let mut incoming = msg(10);
         incoming.text = "hello".to_owned();
@@ -624,8 +626,10 @@ mod tests {
     fn replace_page_keeps_a_live_message_that_arrived_during_the_fetch() {
         let chat = peer_ref(5);
         let chat_id = chat.id.bot_api_dialog_id().unwrap();
-        let mut data = TelegramData::default();
-        data.selected_chat = Some(chat);
+        let mut data = TelegramData {
+            selected_chat: Some(chat),
+            ..Default::default()
+        };
         // A live message (id 10) lands before the select-chat page (newest id 9) is applied.
         data.receive_message(chat_id, msg(10));
         // Page arrives newest-first, as the API returns it, without id 10.

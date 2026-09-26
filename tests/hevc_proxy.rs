@@ -40,13 +40,14 @@ async fn find_first_hevc_video_and_test_proxy_range() {
         }
     };
 
-    let client = match TelegramClient::connect(&config, session).await {
-        Ok(c) => Arc::new(c),
+    let (client, _updates) = match TelegramClient::connect(&config, session).await {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("Skipping test: failed to connect to Telegram: {e}");
             return;
         }
     };
+    let client = Arc::new(client);
 
     let authorized = match client.is_authorized().await {
         Ok(true) => true,

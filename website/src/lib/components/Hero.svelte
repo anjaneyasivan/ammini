@@ -6,14 +6,16 @@
 		{
 			os: 'macOS',
 			icon: 'simple-icons:apple',
-			note: 'Apple Silicon · .dmg',
-			primary: true
+			note: SITE.release ? `Apple Silicon · v${SITE.release.version} .dmg` : 'Apple Silicon · .dmg',
+			primary: true,
+			href: SITE.release?.mac ?? SITE.releases
 		},
 		{
 			os: 'Windows',
 			icon: 'simple-icons:windows',
-			note: 'Windows 10/11 · x64',
-			primary: false
+			note: SITE.release ? `Windows 10/11 · v${SITE.release.version} x64` : 'Windows 10/11 · x64',
+			primary: false,
+			href: SITE.release?.windows ?? SITE.releases
 		}
 	];
 </script>
@@ -40,7 +42,7 @@
 			class="inline-flex items-center gap-2 rounded-full border border-gold-400/25 bg-gold-400/10 px-4 py-1.5 text-xs font-medium tracking-wide text-gold-300 transition hover:border-gold-400/50"
 		>
 			<iconify-icon icon="mdi:open-source-initiative"></iconify-icon>
-			Free & open source · v{SITE.version}
+			Free & open source{#if SITE.release}&nbsp;· v{SITE.release.version}{/if}
 		</a>
 
 		<h1
@@ -61,7 +63,7 @@
 		<div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
 			{#each downloads as d (d.os)}
 				<a
-					href={SITE.releases}
+					href={d.href}
 					target="_blank"
 					rel="noreferrer"
 					class="group flex w-64 items-center gap-3.5 rounded-2xl px-5 py-3.5 text-left transition

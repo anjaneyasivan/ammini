@@ -251,19 +251,21 @@ Notes:
 - **Regenerating the icon.** The artwork is `assets/ammini-logo.png`; the derived files
 are `assets/ammini-icon.png` (window icon, embedded via `include_bytes!`),
 `assets/Ammini.icns` (macOS bundle icon) and `assets/ammini.ico` (Windows exe icon,
-embedded by `winresource`). To regenerate after changing the logo:
+embedded by `winresource`). `assets/ammini-raw-logo.png` is the unprocessed source
+artwork; the master is derived from it (checkerboard background cut, trimmed, centered
+on a 1024² transparent canvas with the margin baked in), so no crop step is needed. To
+regenerate the derived files after changing the logo:
 
   <details>
   <summary>ImageMagick + iconutil commands</summary>
 
   ```bash
-  # Crop the transparent margin off the logo, then make the window icon.
-  magick assets/ammini-logo.png -crop 896x896+80+80 +repage /tmp/ammini-square.png
-  magick /tmp/ammini-square.png -resize 512x512 assets/ammini-icon.png
+  # The master is already a square with breathing room — just resize.
+  magick assets/ammini-logo.png -resize 512x512 assets/ammini-icon.png
 
-  # Build the .icns from the same crop.
+  # Build the .icns from the master.
   mkdir -p /tmp/Ammini.iconset
-  s=/tmp/ammini-square.png
+  s=assets/ammini-logo.png
   magick "$s" -resize 16x16     /tmp/Ammini.iconset/icon_16x16.png
   magick "$s" -resize 32x32     /tmp/Ammini.iconset/icon_16x16@2x.png
   magick "$s" -resize 32x32     /tmp/Ammini.iconset/icon_32x32.png
@@ -276,14 +278,7 @@ embedded by `winresource`). To regenerate after changing the logo:
   magick "$s" -resize 1024x1024 /tmp/Ammini.iconset/icon_512x512@2x.png
   iconutil -c icns /tmp/Ammini.iconset -o assets/Ammini.icns
 
-  rm -rf /tmp/Ammini.iconset /tmp/ammini-square.png
-  ```
-
-  The crop geometry (`896x896+80+80`) is the bounding box of the blue squircle in the
-  source logo. Find it for a different image with:
-
-  ```bash
-  magick logo.png -alpha extract -threshold 50% -format "%@\n" info:
+  rm -rf /tmp/Ammini.iconset
   ```
 
   </details>

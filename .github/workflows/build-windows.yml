@@ -11,8 +11,10 @@ name: Build Windows App
 # DLLs. A versioned zip (also built here) is what gets attached to the GitHub Release on
 # a tag ref.
 #
-# Note: tags/releases created by GITHUB_TOKEN (release-plz) do NOT trigger this
-# workflow — dispatch it manually for release-plz-made tags.
+# Note: tags/releases created by GITHUB_TOKEN (release-plz) do NOT trigger
+# this workflow's push trigger; the release-plz workflow dispatches it at the
+# new tag instead (workflow_dispatch is exempt from that restriction). The
+# manual dispatch below is only needed for a tag pushed by other means.
 
 on:
   workflow_dispatch:

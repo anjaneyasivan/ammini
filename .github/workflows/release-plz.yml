@@ -6,6 +6,13 @@ name: release-plz
 # job, which tags v<version> and creates the GitHub Release.
 # Ammini is a binary app: publish is disabled and versions come from git
 # tags, not crates.io (release-plz.toml).
+#
+# The tag/release is created with GITHUB_TOKEN, whose `push` events do not
+# trigger other workflows, so the release job dispatches the platform build
+# workflows at the new tag itself. workflow_dispatch is exempt from that
+# restriction, so the macOS DMG and the Windows zip build and attach to the
+# release automatically. (build-*.yml keep their own push:tags and
+# workflow_dispatch triggers for tags pushed by other means / manual runs.)
 
 on:
   push:
@@ -22,6 +29,7 @@ jobs:
     permissions:
       contents: write        # push tags and create releases
       pull-requests: read    # detect the release PR and its commits
+      actions: write         # dispatch the platform build workflows
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,11 +39,27 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
+        id: release
         uses: release-plz/action@v0.5
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # GITHUB_TOKEN-created tags/releases do not fire the build workflows'
+      # push:tags triggers; workflow_dispatch is exempt, so dispatch them
+      # explicitly at the freshly created tag to build + attach the binaries.
+      - name: Dispatch platform builds
+        if: steps.release.outputs.releases_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASES: ${{ steps.release.outputs.releases }}
+        run: |
+          for tag in $(jq -r '.[].tag' <<< "$RELEASES"); do
+            echo "Dispatching platform builds for $tag"
+            gh workflow run build-macos.yml --ref "$tag"
+            gh workflow run build-windows.yml --ref "$tag"
+          done
 
   release-plz-pr:
     name: release-plz release-pr

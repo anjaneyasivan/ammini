@@ -12,7 +12,9 @@ name: Build macOS App
 # tag ref the DMG is also attached to the matching GitHub Release.
 #
 # Note: tags/releases created by GITHUB_TOKEN (release-plz) do NOT trigger
-# this workflow — dispatch it manually for release-plz-made tags.
+# this workflow's push trigger; the release-plz workflow dispatches it at the
+# new tag instead (workflow_dispatch is exempt from that restriction). The
+# manual dispatch below is only needed for a tag pushed by other means.
 
 on:
   workflow_dispatch:

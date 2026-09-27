@@ -6,6 +6,14 @@ on:
     paths:
       - 'website/**'
       - '.github/workflows/website-deploy.yml'
+  # Re-deploy when a platform build finishes, so the download buttons switch to a
+  # new release only after its binaries exist. release-plz creates the tag and the
+  # Release (and dispatches the builds) *before* build-macos.yml / build-windows.yml
+  # finish uploading, so `releases/latest` can name a release whose .dmg / -x64.zip
+  # are still missing — the site would then publish dead download links.
+  workflow_run:
+    workflows: ["Build macOS App", "Build Windows App"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -18,23 +26,32 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Skip workflow_run events from failed builds; the asset guard below already
+    # prevents advertising an incomplete release, this just avoids a dead run.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-        working-directory: website
-
-      - name: Resolve latest release tag
+      - name: Resolve latest complete release tag
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          # Only advertise a release once both platform binaries are attached.
+          # release-plz creates the tag + Release before build-macos.yml and
+          # build-windows.yml upload the DMG/zip, so `releases/latest` may name a
+          # release whose download links 404. Pick the newest published release
+          # that has both assets; if none, leave the tag empty so the site falls
+          # back to the releases page.
+          tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=20" \
+            --jq '[.[] | select(.draft == false and .prerelease == false)
+                       | select([.assets[].name] | any(endswith(".dmg")))
+                       | select([.assets[].name] | any(endswith("-x64.zip")))]
+                  | .[0].tag_name // empty' 2>/dev/null || true)"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Latest release tag: ${tag:-<none, download buttons will link to the releases page>}"
+          echo "Latest complete release tag: ${tag:-<none, download buttons will link to the releases page>}"
 
       - name: Build
         run: bun run build

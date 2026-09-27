@@ -16,8 +16,6 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
-    # TEMPORARY (test-only, removed before merge): run on the feature branch.
-    branches: [build-windows]
 
 permissions:
   contents: write        # attach the zip to the GitHub Release

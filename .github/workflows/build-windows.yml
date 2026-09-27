@@ -1,0 +1,101 @@
+name: Build Windows App
+
+# Builds a portable dist/Ammini-<version>-x64.zip on a windows-latest (x64) runner.
+# The zip contains ammini.exe plus libmpv-2.dll / lua51.dll / vulkan-1.dll, which
+# build.rs stages next to the executable. Runs on tag pushes (v*) and manually via
+# workflow_dispatch, e.g.:
+#   gh workflow run build-windows.yml --ref main
+#   gh workflow run build-windows.yml --ref v0.2.0
+# The zip and the build log are uploaded as run artifacts; on a tag ref the zip is
+# also attached to the matching GitHub Release.
+#
+# Note: tags/releases created by GITHUB_TOKEN (release-plz) do NOT trigger this
+# workflow — dispatch it manually for release-plz-made tags.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    # TEMPORARY (test-only, removed before merge): run on the feature branch.
+    branches: [build-windows]
+
+permissions:
+  contents: write        # attach the zip to the GitHub Release
+
+env:
+  MPV_DEV_URL: https://github.com/dyphire/mpv-winbuild/releases/download/mpv_own-2026-08-31/mpv-dev-x86_64-20260831-git-02a595ddc1.7z
+  MPV_DEV_SHA256: 90cafccef4894f071bdee208cae70beab352bb05de8b1d3427402846534e0122
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-x64
+
+      - name: Provision libmpv
+        shell: pwsh
+        run: |
+          $archive = "$env:RUNNER_TEMP\mpv-dev.7z"
+          Invoke-WebRequest -Uri $env:MPV_DEV_URL -OutFile $archive
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:MPV_DEV_SHA256) { throw "libmpv checksum mismatch: $hash" }
+          7z x $archive -olibmpv-x64 -y
+          Copy-Item libmpv-x64\libmpv.dll.a libmpv-x64\mpv.lib
+
+      # Credentials are baked into the binary at compile time by build.rs
+      # (real env wins; there is no .env on CI).
+      - name: Build
+        shell: pwsh
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_OTLP_URL: ${{ secrets.SENTRY_OTLP_URL }}
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc 2>&1 | Tee-Object -FilePath build-output.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "target\x86_64-pc-windows-msvc\release"
+          $dist = "dist\Ammini-x64"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item "$out\ammini.exe" $dist
+          foreach ($dll in "libmpv-2.dll","lua51.dll","vulkan-1.dll") {
+            Copy-Item "$out\$dll" $dist -ErrorAction SilentlyContinue
+          }
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          Compress-Archive -Path "$dist\*" -DestinationPath "dist\Ammini-$version-x64.zip" -Force
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-log
+          path: build-output.log
+
+      - name: Upload zip
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ammini-windows-x64
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Attach zip to GitHub Release
+        if: success() && github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$env:GITHUB_REF_NAME" (Get-ChildItem dist\*.zip).FullName --clobber `
+            || gh release create "$env:GITHUB_REF_NAME" (Get-ChildItem dist\*.zip).FullName --title "Ammini $env:GITHUB_REF_NAME" --generate-notes

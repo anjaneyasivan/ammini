@@ -14,10 +14,15 @@
   Tahoma/Leelawadee UI/Sylfaen/Myanmar Text/Himalaya, plus the CJK faces); shared font
   files are read once and shared via `Arc`.
 - **cache.rs** (item 3): done. Manifest rename retries after removing the destination.
+- **`.ico` + exe resources** (item 4): done. `scripts/make-ico.ps1` generates
+  `assets/ammini.ico` (no ImageMagick needed), and `build.rs` embeds it plus
+  `ProductName`/`FileDescription`/`FileVersion` via the `winresource` build-dependency
+  (needs `rc.exe` from the Windows SDK).
 - **Docs**: BUILDING.md + README updated.
-- **Not done**: the `.ico`/`winresource` embed (item 4) and the CI/release workflows
-  (item 5). The Windows `proxy_video` test is timing-sensitive and can fail under x64
-  emulation, so gate it accordingly if it is added to CI.
+- **Not done**: the CI/release workflows (item 5). `WINDOWS-BUILD.md` contains a
+  ready-to-use GitHub Actions workflow for that. The Windows `proxy_video` test is
+  timing-sensitive and can fail under x64 emulation, so gate it accordingly if it is
+  added to CI.
 - **Missed by the plan — TLS backend.** `reqwest 0.13`'s default rustls provider is
   `aws-lc-rs`, whose `aws-lc-sys` build cannot assemble its ARM64 sources on
   `aarch64-pc-windows-msvc`. `ring` needs `clang`, which is not guaranteed. Ammini now

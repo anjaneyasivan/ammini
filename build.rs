@@ -17,6 +17,33 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     windows_libmpv();
+
+    embed_windows_resources();
+}
+
+/// Embed the app icon and version info into the Windows executable. Guarded on the
+/// *target* OS (not the host), so it also runs when cross-compiling to Windows. A
+/// no-op on every other target.
+fn embed_windows_resources() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+
+    println!("cargo:rerun-if-changed=assets/ammini.ico");
+
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    let mut res = winresource::WindowsResource::new();
+    res.set_icon("assets/ammini.ico");
+    res.set("ProductName", "Ammini");
+    res.set("FileDescription", "Ammini");
+    res.set("OriginalFilename", "ammini.exe");
+    res.set("ProductVersion", &version);
+    res.set("FileVersion", &version);
+    res.set("LegalCopyright", "Ammini contributors");
+
+    if let Err(e) = res.compile() {
+        panic!("failed to embed Windows resources (icon/version info): {e}");
+    }
 }
 
 /// Point the MSVC linker at libmpv's import library and stage the runtime DLL next

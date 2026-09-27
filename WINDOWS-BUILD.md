@@ -213,5 +213,8 @@ gh workflow run build-windows.yml --ref v<version>
 - **`cargo test` on Windows.** The offline suites pass; the `proxy_video` test
   `prefetch_downloads_future_blocks_in_parallel` is timing-sensitive and can fail under
   x64 emulation (a real x64 host is fine).
-- **`.ico` / version info** are not embedded yet; the window/taskbar icon comes from the
-  PNG in `main.rs`.
+- **Icon / version info.** The exe icon and `ProductName`/`FileVersion` are embedded by
+  `winresource` (a build-dependency) from `assets/ammini.ico`. Regenerate that file with
+  `powershell -ExecutionPolicy Bypass -File scripts/make-ico.ps1` after changing the
+  artwork. This needs a Windows resource compiler (`rc.exe`, shipped with the Windows
+  SDK / VS Build Tools).

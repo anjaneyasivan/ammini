@@ -249,8 +249,9 @@ Notes:
 - **Licensing.** Homebrew's mpv/ffmpeg are GPL-licensed; redistributing the bundled
   libraries carries licence obligations. The script is aimed at personal builds.
 - **Regenerating the icon.** The artwork is `assets/ammini-logo.png`; the derived files
-  are `assets/ammini-icon.png` (window icon, embedded via `include_bytes!`) and
-  `assets/Ammini.icns` (bundle icon). To regenerate after changing the logo:
+are `assets/ammini-icon.png` (window icon, embedded via `include_bytes!`),
+`assets/Ammini.icns` (macOS bundle icon) and `assets/ammini.ico` (Windows exe icon,
+embedded by `winresource`). To regenerate after changing the logo:
 
   <details>
   <summary>ImageMagick + iconutil commands</summary>
@@ -286,6 +287,13 @@ Notes:
   ```
 
   </details>
+
+  The Windows `.ico` is generated from `assets/ammini-icon.png` without ImageMagick (it
+  embeds PNG-compressed 256/128/64/48/32/16 images):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts/make-ico.ps1
+  ```
 
 ## 7. Tests
 

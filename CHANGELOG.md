@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4](https://github.com/anjaneyasivan/ammini/compare/v0.1.3...v0.1.4) - 2026-09-27
+
+### Added
+
+- *(website)* landing page
+- embed Windows exe icon and version info
+- add Windows x64 support and build guide
+
+### Other
+
+- deploy the website to gh-pages
+- adopt the ammini mascot as the app icon
+- build and attach platform binaries automatically on release
+- Revert "ci: publish optional Mesa software-OpenGL artifact"
+- publish optional Mesa software-OpenGL artifact
+- drop temporary branch trigger from Windows workflow
+- upload Windows folder as artifact to avoid double zip
+- drop temporary branch trigger from Windows workflow
+- add Windows x64 build/release workflow
+
 ## [0.1.3](https://github.com/anjaneyasivan/ammini/compare/v0.1.2...v0.1.3) - 2026-09-26
 
 ### Fixed

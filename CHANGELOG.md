@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7](https://github.com/anjaneyasivan/ammini/compare/v0.1.6...v0.1.7) - 2026-09-27
+
+### Fixed
+
+- *(ci)* restore website dependency install step
+- *(ci)* only advertise releases whose binaries are attached
+
 ## [0.1.6](https://github.com/anjaneyasivan/ammini/compare/v0.1.5...v0.1.6) - 2026-09-27
 
 ### Fixed

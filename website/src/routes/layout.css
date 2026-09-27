@@ -1,0 +1,59 @@
+@import 'tailwindcss';
+
+@theme {
+	--font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--font-display: 'Outfit', 'Inter', ui-sans-serif, system-ui, sans-serif;
+	--font-malayalam: 'Noto Sans Malayalam', 'Inter', sans-serif;
+
+	--color-ink-950: #0b0906;
+	--color-ink-900: #12100b;
+	--color-ink-800: #1b1712;
+	--color-ink-700: #262019;
+	--color-ink-600: #362e24;
+
+	--color-cream-100: #f7f1e6;
+	--color-cream-300: #ded3c0;
+	--color-cream-500: #a99c88;
+	--color-cream-600: #7d7263;
+
+	--color-gold-300: #f6d389;
+	--color-gold-400: #eebc5f;
+	--color-gold-500: #dda437;
+	--color-gold-600: #b88425;
+
+	--color-lagoon-300: #6cc7c9;
+	--color-lagoon-400: #3fa9ad;
+	--color-lagoon-500: #2c8a90;
+
+	--animate-float: float 7s ease-in-out infinite;
+
+	@keyframes float {
+		0%,
+		100% {
+			transform: translateY(0);
+		}
+		50% {
+			transform: translateY(-14px);
+		}
+	}
+}
+
+html {
+	scroll-behavior: smooth;
+}
+
+body {
+	@apply bg-ink-950 font-sans text-cream-100 antialiased;
+}
+
+::selection {
+	@apply bg-gold-400 text-ink-950;
+}
+
+/* iconify-icon: avoid layout shift while icons load from the API */
+iconify-icon {
+	display: inline-block;
+	width: 1em;
+	height: 1em;
+	vertical-align: -0.125em;
+}

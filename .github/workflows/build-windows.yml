@@ -1,13 +1,15 @@
 name: Build Windows App
 
-# Builds a portable dist/Ammini-<version>-x64.zip on a windows-latest (x64) runner.
-# The zip contains ammini.exe plus libmpv-2.dll / lua51.dll / vulkan-1.dll, which
-# build.rs stages next to the executable. Runs on tag pushes (v*) and manually via
-# workflow_dispatch, e.g.:
+# Builds a portable Windows x64 package on a windows-latest runner. The package is
+# ammini.exe plus libmpv-2.dll / lua51.dll / vulkan-1.dll, which build.rs stages next
+# to the executable. Runs on tag pushes (v*) and manually via workflow_dispatch, e.g.:
 #   gh workflow run build-windows.yml --ref main
 #   gh workflow run build-windows.yml --ref v0.2.0
-# The zip and the build log are uploaded as run artifacts; on a tag ref the zip is
-# also attached to the matching GitHub Release.
+# The staged folder and the build log are uploaded as run artifacts. The folder, not a
+# zip, is uploaded because actions/upload-artifact always wraps its payload in a zip:
+# uploading the folder makes the downloaded artifact a single zip containing the exe and
+# DLLs. A versioned zip (also built here) is what gets attached to the GitHub Release on
+# a tag ref.
 #
 # Note: tags/releases created by GITHUB_TOKEN (release-plz) do NOT trigger this
 # workflow — dispatch it manually for release-plz-made tags.
@@ -16,6 +18,8 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    # TEMPORARY (test-only, removed before merge): run on the feature branch.
+    branches: [build-windows]
 
 permissions:
   contents: write        # attach the zip to the GitHub Release
@@ -61,7 +65,10 @@ jobs:
           cargo build --release --target x86_64-pc-windows-msvc 2>&1 | Tee-Object -FilePath build-output.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Package
+      # Stage a portable folder. The versioned zip is built separately (below): uploading
+      # this folder, not the zip, is what avoids a zip-inside-a-zip download.
+      - name: Stage portable package
+        id: package
         shell: pwsh
         run: |
           $out = "target\x86_64-pc-windows-msvc\release"
@@ -72,7 +79,13 @@ jobs:
             Copy-Item "$out\$dll" $dist -ErrorAction SilentlyContinue
           }
           $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          Compress-Archive -Path "$dist\*" -DestinationPath "dist\Ammini-$version-x64.zip" -Force
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      # Versioned zip for the GitHub Release (and manual distribution).
+      - name: Create release zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist\Ammini-x64\*" -DestinationPath "dist\Ammini-${{ steps.package.outputs.version }}-x64.zip" -Force
 
       - name: Upload build log
         if: always()
@@ -81,12 +94,14 @@ jobs:
           name: windows-build-log
           path: build-output.log
 
-      - name: Upload zip
+      # Upload the staged folder, not the zip: actions/upload-artifact always wraps its
+      # payload in a zip, so uploading a zip would download as a zip-in-a-zip.
+      - name: Upload portable package
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ammini-windows-x64
-          path: dist/*.zip
+          name: Ammini-${{ steps.package.outputs.version }}-x64
+          path: dist/Ammini-x64/
           if-no-files-found: error
 
       - name: Attach zip to GitHub Release

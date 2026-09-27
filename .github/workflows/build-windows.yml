@@ -11,12 +11,6 @@ name: Build Windows App
 # DLLs. A versioned zip (also built here) is what gets attached to the GitHub Release on
 # a tag ref.
 #
-# A separate "Ammini-<version>-x64-software-gl" artifact holds Mesa llvmpipe's
-# opengl32.dll for machines with no OpenGL 2.0+ driver (headless VMs, CI, some RDP
-# sessions). It is deliberately NOT in the main package — dropping opengl32.dll next to
-# the exe overrides the real GPU driver, so it must stay opt-in. To use it, unzip the
-# software-gl artifact over an extracted portable package before running.
-#
 # Note: tags/releases created by GITHUB_TOKEN (release-plz) do NOT trigger this
 # workflow — dispatch it manually for release-plz-made tags.
 
@@ -31,9 +25,6 @@ permissions:
 env:
   MPV_DEV_URL: https://github.com/dyphire/mpv-winbuild/releases/download/mpv_own-2026-08-31/mpv-dev-x86_64-20260831-git-02a595ddc1.7z
   MPV_DEV_SHA256: 90cafccef4894f071bdee208cae70beab352bb05de8b1d3427402846534e0122
-  # Mesa llvmpipe (software OpenGL) for x64. See https://github.com/mmozeiko/build-mesa.
-  MESA_URL: https://github.com/mmozeiko/build-mesa/releases/download/26.2.3/mesa-llvmpipe-x64-26.2.3.7z
-  MESA_SHA256: bd0d817fbf33a7ec41aa770841eb83cc609f7c67fef7c8b56fde901a5b80a8ee
 
 jobs:
   build:
@@ -94,29 +85,6 @@ jobs:
         run: |
           Compress-Archive -Path "dist\Ammini-x64\*" -DestinationPath "dist\Ammini-${{ steps.package.outputs.version }}-x64.zip" -Force
 
-      # Optional software-OpenGL drop-in (Mesa llvmpipe). Kept out of the portable
-      # package on purpose: an opengl32.dll beside the exe takes precedence over the
-      # system driver, so it is only for machines that lack a real OpenGL 2.0+ driver.
-      - name: Stage software OpenGL (Mesa llvmpipe)
-        id: softgl
-        shell: pwsh
-        run: |
-          $archive = "$env:RUNNER_TEMP\mesa.7z"
-          Invoke-WebRequest -Uri $env:MESA_URL -OutFile $archive
-          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
-          if ($hash -ne $env:MESA_SHA256) { throw "Mesa checksum mismatch: $hash" }
-          $mesa = "$env:RUNNER_TEMP\mesa"
-          Remove-Item $mesa -Recurse -Force -ErrorAction SilentlyContinue
-          7z x $archive "-o$mesa" -y
-          # 7z extracts opengl32.dll at the archive root; find it in case the layout
-          # changes between Mesa releases.
-          $dll = Get-ChildItem $mesa -Recurse -Filter opengl32.dll | Select-Object -First 1
-          if (-not $dll) { throw "opengl32.dll not found in the Mesa archive" }
-          $dist = "dist\Ammini-software-gl"
-          New-Item -ItemType Directory -Force -Path $dist | Out-Null
-          Copy-Item $dll.FullName $dist
-          "path=$dist" >> $env:GITHUB_OUTPUT
-
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -132,16 +100,6 @@ jobs:
         with:
           name: Ammini-${{ steps.package.outputs.version }}-x64
           path: dist/Ammini-x64/
-          if-no-files-found: error
-
-      # Optional, architecture-matched software OpenGL. Unzip over an extracted
-      # portable package to run on a machine with no GPU driver.
-      - name: Upload software OpenGL
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ammini-${{ steps.package.outputs.version }}-x64-software-gl
-          path: ${{ steps.softgl.outputs.path }}/
           if-no-files-found: error
 
       - name: Attach zip to GitHub Release

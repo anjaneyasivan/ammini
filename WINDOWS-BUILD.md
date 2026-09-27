@@ -95,15 +95,7 @@ Invoke-WebRequest "https://github.com/mmozeiko/build-mesa/releases/download/26.2
 Copy-Item "$env:TEMP\mesa\opengl32.dll" "target\x86_64-pc-windows-msvc\release\"
 ```
 
-mpv logs `Suspected software renderer or indirect context` and renders normally. The CI
-workflow publishes this DLL as a separate `*-software-gl` artifact, so on a GPU-less
-machine unzip it over an extracted portable package:
-
-```powershell
-Expand-Archive Ammini-0.1.3-x64.zip -DestinationPath Ammini
-Expand-Archive Ammini-0.1.3-x64-software-gl.zip -DestinationPath Ammini   # overlay
-.\Ammini\ammini.exe
-```
+mpv logs `Suspected software renderer or indirect context` and renders normally.
 
 ## Step 6 — Package
 
@@ -125,12 +117,7 @@ Compress-Archive -Path "$dist\*" -DestinationPath "dist\Ammini-$version-x64.zip"
 ## GitHub Actions workflow
 
 Save as `.github/workflows/build-windows.yml`. It builds on every tag and on manual
-dispatch, uploads the portable folder as an artifact, and attaches a versioned zip to the
-GitHub Release on tags. It also publishes a second, optional
-`Ammini-<version>-x64-software-gl` artifact with Mesa llvmpipe's `opengl32.dll` for
-machines without an OpenGL 2.0+ driver (see Step 5). That DLL is kept **out** of the main
-package on purpose — an `opengl32.dll` next to the exe takes precedence over the real
-driver, so it must stay opt-in.
+dispatch, uploads the zip as an artifact, and attaches it to the GitHub Release on tags.
 
 ```yaml
 name: build-windows

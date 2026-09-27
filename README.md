@@ -127,9 +127,8 @@ do not have Homebrew's mpv installed — and only needs the built-in macOS tools
 
 Worth knowing:
 
-- Everything is ad-hoc signed, which is fine locally and shareable via
-  right-click → Open the first time. Shipping to the public without a Gatekeeper warning
-  needs a Developer ID signature and notarization, which the script does not do.
+- Everything is ad-hoc signed, which is fine locally but **not notarized**, so a
+  downloaded build needs a one-time Gatekeeper bypass (see below).
 - The release build bakes your Telegram credentials into the binary, so treat the DMG as
   containing them.
 - Homebrew's mpv/ffmpeg are GPL-licensed; redistributing the bundled libraries carries
@@ -138,6 +137,20 @@ Worth knowing:
   against the build machine — so build the DMG on the oldest macOS you need to support
   (`MIN_MACOS=15.5 scripts/bundle-macos.sh` declares the target; see BUILDING.md →
   "Supported macOS versions").
+
+### Installing a downloaded build on macOS
+
+macOS quarantines anything downloaded from the internet, and because the build is only
+ad-hoc signed (not notarized) Gatekeeper blocks the first launch — the Dock icon can just
+bounce and the app never opens. Right-click the app → **Open** once, or clear the
+quarantine flag:
+
+```bash
+sudo xattr -dr com.apple.quarantine /Applications/Ammini.app
+```
+
+Shipping to the public without that extra step needs a Developer ID signature and
+notarization, which `bundle-macos.sh` does not do.
 
 ## Shortcuts
 

@@ -99,6 +99,26 @@
 			> · no account needed for local files
 		</p>
 
+		<!-- macOS first-launch note: the build is ad-hoc signed, not notarized, so a
+		     quarantined download is blocked by Gatekeeper until the flag is cleared. -->
+		<div
+			class="mx-auto mt-6 max-w-xl rounded-2xl border border-white/10 bg-ink-800/70 px-5 py-4 text-left"
+		>
+			<p class="flex items-center gap-2 text-xs font-semibold text-cream-300">
+				<iconify-icon icon="simple-icons:apple" class="text-base"></iconify-icon>
+				macOS first launch
+			</p>
+			<p class="mt-2 text-xs leading-relaxed text-cream-500">
+				The build is ad-hoc signed and not notarized, so Gatekeeper may block it — the app can just
+				bounce in the Dock. Right-click the app &rarr;
+				<span class="text-cream-200">Open</span>, or clear the quarantine flag:
+			</p>
+			<code
+				class="mt-3 block overflow-x-auto rounded-lg border border-white/10 bg-ink-950 px-3 py-2 font-mono text-[11px] text-cream-300"
+				>sudo xattr -dr com.apple.quarantine /Applications/Ammini.app</code
+			>
+		</div>
+
 		<!-- App screenshot -->
 		<div class="relative mx-auto mt-16 max-w-4xl">
 			<div

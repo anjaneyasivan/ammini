@@ -58,9 +58,51 @@ LIBRARY_PATH=/path/to/libmpv/lib cargo build
 
 **Windows**
 
-Install a libmpv build (e.g. [shinchiro's builds](https://github.com/shinchiro/mpv-winbuild-cmake)
-or [mpv.io](https://mpv.io/installation/)), make sure the linker can find
-`libmpv.dll.a` / `mpv.lib`, and put `libmpv.dll` next to the produced `ammini.exe`.
+Download a prebuilt **mpv dev package** matching the target architecture and unpack it
+at the repository root as `libmpv-x64` (x86_64) or `libmpv-arm64` (aarch64). `build.rs`
+finds it automatically, or you can point `MPV_LINK_DIR` at it. Suggested sources:
+
+- [dyphire/mpv-winbuild](https://github.com/dyphire/mpv-winbuild/releases) — daily
+  builds with sha256 checksums; assets are named `mpv-dev-x86_64-*.7z`.
+- [zhongfly/mpv-winbuild](https://github.com/zhongfly/mpv-winbuild/releases) — same layout.
+- [shinchiro's builds](https://sourceforge.net/projects/mpv-player-windows/files/libmpv/)
+  — canonical, but SourceForge can be flaky.
+
+The package contains `libmpv-2.dll`, a MinGW import library (`libmpv.dll.a`) and
+`include/`. `libmpv2-sys` asks the linker for a bare `mpv`, i.e. `mpv.lib`, so create one
+in the unpacked directory either way:
+
+```powershell
+# Either: MSVC links the COFF import library under the expected name.
+Copy-Item libmpv-x64\libmpv.dll.a libmpv-x64\mpv.lib
+
+# Or (more robust): generate a native import library from the exports.
+lib.exe /def:libmpv-2.def /machine:X64 /out:libmpv-x64\mpv.lib
+```
+
+Then `cargo build` works with no environment variables: `build.rs` adds the directory to
+the linker search path and copies every DLL from it (`libmpv-2.dll`, `lua51.dll`,
+`vulkan-1.dll`, …) next to the built executable, so `cargo run` finds them.
+
+> **Architecture matters.** Ammini renders video through mpv's **OpenGL render API**.
+> The standard ARM64 Windows mpv builds disable OpenGL (`-Dgl=disabled`, because ANGLE
+> does not support Windows on ARM), so `mpv_render_context_create` returns
+> `MPV_ERROR_NOT_IMPLEMENTED` and the player cannot start. On a Windows-on-ARM machine,
+> build and run the **x86_64** target instead (Windows 11 emulates x64):
+>
+> ```powershell
+> rustup target add x86_64-pc-windows-msvc
+> cargo run --target x86_64-pc-windows-msvc
+> ```
+
+> **Software OpenGL (VMs / headless).** Windows' built-in `opengl32.dll` only provides
+> OpenGL 1.1, which is below the OpenGL 2.0 that `egui`/`egui_glow` (and mpv) require. On
+> a machine without a real GPU driver (e.g. a VM), drop a software implementation next to
+> the executable: download a Mesa **llvmpipe** build for your architecture from
+> [mmozeiko/build-mesa](https://github.com/mmozeiko/build-mesa/releases)
+> (`mesa-llvmpipe-x64-*.7z` / `mesa-llvmpipe-arm64-*.7z`) and copy its `opengl32.dll` into
+> `target/<triple>/debug/` (or `release/`). mpv logs `Suspected software renderer or
+> indirect context` and then renders normally.
 
 ### Platform toolchain
 
@@ -69,7 +111,10 @@ or [mpv.io](https://mpv.io/installation/)), make sure the linker can find
   all bundled with macOS.
 - **Linux**: a C toolchain plus `pkg-config` (see above). Video renders through OpenGL,
   so a working GL driver is required at runtime.
-- **Windows**: the MSVC toolchain (or the GNU one with a matching libmpv build).
+- **Windows**: the MSVC toolchain (VS Build Tools with the "Desktop development with
+  C++" workload; Rust 1.92+ defaults to MSVC). Build the **x86_64** target — see the
+  architecture note above. Video renders through OpenGL, so a working GL driver (or a
+  software `opengl32.dll`) is required at runtime.
 
 ## 2. Get the source
 
@@ -295,6 +340,15 @@ That is Gatekeeper on an ad-hoc signed, quarantined app. Right-click → Open, o
 ```bash
 xattr -dr com.apple.quarantine /Applications/Ammini.app
 ```
+
+**`failed to initialize player: libmpv2: Raw(-19)` (Windows)**
+`-19` is mpv's `MPV_ERROR_NOT_IMPLEMENTED`: the loaded `libmpv-2.dll` has no OpenGL
+render API. This is the case for the standard ARM64 Windows mpv builds — use the x86_64
+target (see the architecture note in step 1) and an x64 mpv dev package.
+
+**`egui_glow requires opengl 2.0+` or a blank window (Windows VM / headless)**
+The machine has no OpenGL 2.0+ driver (Windows' built-in OpenGL is 1.1). Copy a Mesa
+llvmpipe `opengl32.dll` next to the executable — see the software-OpenGL note in step 1.
 
 **`warning: the following packages contain code that will be rejected by a future
 version of Rust: proc-macro-error2`**

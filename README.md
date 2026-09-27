@@ -74,10 +74,19 @@ LIBRARY_PATH=/path/to/libmpv/lib cargo build
 
 ### Windows
 
-Install a libmpv build (e.g. from [shinchiro's Windows builds](https://github.com/shinchiro/mpv-winbuild-cmake)
-or [mpv.io](https://mpv.io/installation/)). Make sure the linker can find
-`libmpv.dll.a`/`mpv.lib` and that `libmpv.dll` is next to the final `ammini.exe` at
-runtime.
+Windows 10+ (x64). Download a prebuilt mpv **dev package** matching your target and
+unpack it at the repo root as `libmpv-x64` (e.g.
+[dyphire/mpv-winbuild](https://github.com/dyphire/mpv-winbuild/releases) or
+[zhongfly/mpv-winbuild](https://github.com/zhongfly/mpv-winbuild/releases)); `build.rs`
+finds it and copies the runtime DLLs next to the executable automatically. `libmpv2-sys`
+links against `mpv.lib`, so create one in that directory (copy `libmpv.dll.a` to
+`mpv.lib`, or generate it with `lib.exe /def:libmpv-2.def /machine:X64 /out:mpv.lib`).
+See [BUILDING.md](BUILDING.md#1-prerequisites) for the full steps.
+
+> Ammini uses mpv's **OpenGL render API**, which the standard ARM64 Windows mpv builds
+> disable. On a Windows-on-ARM machine, build the x86_64 target
+> (`cargo run --target x86_64-pc-windows-msvc`); on a VM or headless box without a GPU
+> driver, drop a Mesa llvmpipe `opengl32.dll` next to the executable.
 
 ## Setup
 

@@ -10,3 +10,9 @@
 
 # Scratch eframe sandbox binary
 eframe_window
+
+# libmpv dev packages (downloaded per architecture, large)
+/libmpv
+/libmpv-x64
+/libmpv-arm64
+/libmpv-x86

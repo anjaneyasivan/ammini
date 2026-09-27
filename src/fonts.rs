@@ -3,6 +3,7 @@
 //! symbols/dingbats/arrows the emoji font lacks, plus best-effort system fonts as
 //! fallbacks for non-Latin scripts (Devanagari, Arabic, Thai, …).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use eframe::egui;
@@ -28,11 +29,12 @@ const NOTO_EMOJI: &[u8] = include_bytes!("../assets/fonts/NotoEmoji-Variable.ttf
 /// Source: dejavu-fonts 2.37, `ttf/DejaVuSans.ttf` (see `assets/fonts/LICENSE-DejaVu.txt`).
 const DEJA_VU_SANS: &[u8] = include_bytes!("../assets/fonts/DejaVuSans.ttf");
 
-/// System fonts tried as script fallbacks, one entry per script. macOS entries are kept
-/// small (< 5 MB): the big ones (PingFang.ttc ~78 MB, Arial Unicode ~23 MB) are skipped
-/// on purpose to keep startup and memory usage light — CJK on macOS is therefore not
-/// covered. Each font is loaded only when it exists, so this degrades gracefully on
-/// other platforms.
+/// System fonts tried as script fallbacks, one entry per script (entries for every
+/// platform are listed together; each is loaded only when its path exists, so this
+/// degrades gracefully). macOS entries are kept small (< 5 MB): the big ones
+/// (PingFang.ttc ~78 MB, Arial Unicode ~23 MB) are skipped on purpose to keep startup
+/// and memory usage light — CJK on macOS is therefore not covered. Windows CJK faces are
+/// smaller, so they are included (see the entries below).
 ///
 /// NOTE: egui panics at startup if any registered font fails to parse, so only add fonts
 /// that are known to load; `tests/emoji_support.rs` (which builds a `Fonts` from these
@@ -96,6 +98,32 @@ const SYSTEM_FALLBACKS: &[(&str, &str, u32)] = &[
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         0,
     ),
+    // Windows (C:\Windows\Fonts). Nirmala UI covers most Indic scripts from a single
+    // file; the loader below caches by path so it is read and held only once even
+    // though it is registered under several script names.
+    ("Devanagari", r"C:\Windows\Fonts\Nirmala.ttc", 0),
+    ("Bengali", r"C:\Windows\Fonts\Nirmala.ttc", 0),
+    ("Gurmukhi", r"C:\Windows\Fonts\Nirmala.ttc", 0),
+    ("Gujarati", r"C:\Windows\Fonts\Nirmala.ttc", 0),
+    ("Oriya", r"C:\Windows\Fonts\Nirmala.ttc", 0),
+    ("Tamil", r"C:\Windows\Fonts\Nirmala.ttc", 0),
+    ("Telugu", r"C:\Windows\Fonts\Nirmala.ttc", 0),
+    ("Kannada", r"C:\Windows\Fonts\Nirmala.ttc", 0),
+    ("Malayalam", r"C:\Windows\Fonts\Nirmala.ttc", 0),
+    ("Sinhala", r"C:\Windows\Fonts\Nirmala.ttc", 0),
+    ("Arabic", r"C:\Windows\Fonts\tahoma.ttf", 0),
+    ("Hebrew", r"C:\Windows\Fonts\tahoma.ttf", 0),
+    ("Thai", r"C:\Windows\Fonts\LeelawUI.ttf", 0),
+    ("Lao", r"C:\Windows\Fonts\LeelawUI.ttf", 0),
+    ("Myanmar", r"C:\Windows\Fonts\mmrtext.ttf", 0),
+    ("Armenian", r"C:\Windows\Fonts\sylfaen.ttf", 0),
+    ("Georgian", r"C:\Windows\Fonts\sylfaen.ttf", 0),
+    ("Tibetan", r"C:\Windows\Fonts\himalaya.ttf", 0),
+    // CJK. Unlike macOS (where the system faces are 20-80 MB), Windows' CJK faces are
+    // modest enough to include; they cover Chinese (Simplified/Traditional) and Korean.
+    ("ChineseSimplified", r"C:\Windows\Fonts\msyh.ttc", 0),
+    ("ChineseTraditional", r"C:\Windows\Fonts\msjh.ttc", 0),
+    ("Korean", r"C:\Windows\Fonts\malgun.ttf", 0),
 ];
 
 /// Build the app's font stack on top of the egui defaults. Our emoji font and any system
@@ -125,22 +153,32 @@ pub fn font_definitions() -> egui::FontDefinitions {
     // DejaVu Sans sits right after the emoji font: it picks up symbols/arrows/dingbats
     // the emoji font doesn't cover, before egui's (outdated) builtins or script fallbacks.
     let mut fallbacks: Vec<String> = vec!["NotoEmoji".to_owned(), "DejaVuSans".to_owned()];
+    // Several scripts can share one font file (e.g. Nirmala UI on Windows), so cache
+    // the parsed data by (path, index) and hand out Arc clones instead of re-reading and
+    // re-holding the same bytes under each script name.
+    let mut loaded: HashMap<(&str, u32), Arc<egui::FontData>> = HashMap::new();
     for (name, path, index) in SYSTEM_FALLBACKS {
-        match std::fs::read(path) {
-            Ok(bytes) => {
-                tracing::debug!("fonts: loaded {name} from {path}");
-                defs.font_data.insert(
-                    (*name).to_owned(),
-                    Arc::new(egui::FontData {
-                        index: *index,
-                        tweak: Default::default(),
-                        font: bytes.into(),
-                    }),
-                );
-                fallbacks.push((*name).to_owned());
-            }
-            Err(e) => tracing::debug!("fonts: skipping {name} ({path}): {e}"),
-        }
+        let data = match loaded.entry((path, *index)) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
+            std::collections::hash_map::Entry::Vacant(entry) => match std::fs::read(path) {
+                Ok(bytes) => {
+                    tracing::debug!("fonts: loaded {name} from {path}");
+                    entry
+                        .insert(Arc::new(egui::FontData {
+                            index: *index,
+                            tweak: Default::default(),
+                            font: bytes.into(),
+                        }))
+                        .clone()
+                }
+                Err(e) => {
+                    tracing::debug!("fonts: skipping {name} ({path}): {e}");
+                    continue;
+                }
+            },
+        };
+        defs.font_data.insert((*name).to_owned(), data);
+        fallbacks.push((*name).to_owned());
     }
 
     for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {

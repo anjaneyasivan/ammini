@@ -213,9 +213,8 @@ impl BlockCache {
         }
         let target = self.manifest_path();
         let tmp = PathBuf::from(format!("{}.tmp", target.display()));
-        match std::fs::write(&tmp, &bytes).and_then(|_| std::fs::rename(&tmp, &target)) {
-            Ok(()) => {}
-            Err(e) => tracing::debug!("cache: manifest write failed for {}: {e}", target.display()),
+        if let Err(e) = write_manifest(&tmp, &target, &bytes) {
+            tracing::debug!("cache: manifest write failed for {}: {e}", target.display());
         }
     }
 
@@ -328,6 +327,28 @@ impl BlockCache {
 /// Number of blocks a video of `total_size` bytes is split into.
 fn block_count_for(total_size: u64) -> u64 {
     total_size.div_ceil(BLOCK_SIZE)
+}
+
+/// Write `bytes` to `tmp`, then rename it over `target`.
+///
+/// On Windows a rename can fail with a sharing violation if another handle holds
+/// `target` open without `FILE_SHARE_DELETE`; fall back to removing the destination and
+/// retrying once. A failed manifest write only costs cache reuse, never correctness, so
+/// the fallback is best-effort.
+fn write_manifest(tmp: &Path, target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    std::fs::write(tmp, bytes)?;
+    match std::fs::rename(tmp, target) {
+        Ok(()) => Ok(()),
+        Err(first) => {
+            tracing::debug!(
+                "cache: rename {} -> {} failed ({first}); retrying after removing target",
+                tmp.display(),
+                target.display()
+            );
+            let _ = std::fs::remove_file(target);
+            std::fs::rename(tmp, target)
+        }
+    }
 }
 
 /// Delete a video file together with its manifest (and any stray tmp file).

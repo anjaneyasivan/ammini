@@ -1,8 +1,35 @@
 # Windows support — research & plan
 
-> **Status: research only, not implemented.** Written 2026-09-25 after a codebase audit +
-> web research, so the implementation can start from facts instead of re-doing the
-> investigation. Work items are listed in "Suggested order of work" at the bottom.
+> **Status: implemented for Windows x64 (2026-09-27).** Written 2026-09-25 after a
+> codebase audit + web research. See "Implementation notes" below for what landed and the
+> two things the original plan missed. Work items are listed in "Suggested order of work"
+> at the bottom.
+
+## Implementation notes (2026-09-27)
+
+- **build.rs** (item 1): done. `$MPV_LINK_DIR` → `libmpv-<arch>` (`libmpv-x64` /
+  `libmpv-arm64` / `libmpv-x86`) → `libmpv`, and every DLL in that directory is staged
+  next to the built executable, so `cargo run` needs no `PATH` fiddling.
+- **fonts.rs** (item 2): done. Windows table (Nirmala UI for the Indic scripts,
+  Tahoma/Leelawadee UI/Sylfaen/Myanmar Text/Himalaya, plus the CJK faces); shared font
+  files are read once and shared via `Arc`.
+- **cache.rs** (item 3): done. Manifest rename retries after removing the destination.
+- **Docs**: BUILDING.md + README updated.
+- **Not done**: the `.ico`/`winresource` embed (item 4) and the CI/release workflows
+  (item 5). The Windows `proxy_video` test is timing-sensitive and can fail under x64
+  emulation, so gate it accordingly if it is added to CI.
+- **Missed by the plan — TLS backend.** `reqwest 0.13`'s default rustls provider is
+  `aws-lc-rs`, whose `aws-lc-sys` build cannot assemble its ARM64 sources on
+  `aarch64-pc-windows-msvc`. `ring` needs `clang`, which is not guaranteed. Ammini now
+  selects the backend per platform: **native-tls (Schannel) on Windows**, rustls + ring
+  elsewhere (`[target.'cfg(windows)'.dependencies]` in Cargo.toml).
+- **Missed by the plan — ARM64 mpv has no OpenGL.** The standard ARM64 Windows mpv
+  builds pass `-Dgl=disabled` (shinchiro/zhongfly), because ANGLE does not support
+  Windows on ARM. `mpv_render_context_create` therefore returns
+  `MPV_ERROR_NOT_IMPLEMENTED (-19)` and the OpenGL render API that `egui-sharkplayer`
+  needs is simply absent. **Windows-on-ARM must run the x86_64 target** (Windows 11
+  emulates x64), which has OpenGL. On a GPU-less VM/headless box, drop a Mesa llvmpipe
+  `opengl32.dll` next to the executable.
 
 ## TL;DR
 

@@ -107,8 +107,9 @@ struct AmminiApp {
     /// drained once per frame to measure seek latency. Shared with the widget via
     /// an Arc because the callback outlives the frame that installed it.
     pending_seek: Arc<std::sync::Mutex<Option<SeekTracker>>>,
-    /// Keeps the macOS display awake while media is actually playing (released on
-    /// pause); no-op on other platforms.
+    /// Keeps the display awake while media is actually playing (released on pause).
+    /// Backed by IOKit on macOS and `SetThreadExecutionState` on Windows; a no-op where
+    /// the platform has no backend.
     display_sleep: ammini::display_sleep::Guard,
     /// Per-message disk-cache coverage of Telegram videos (msg_id → total bytes +
     /// cached byte ranges), refreshed once per second by the bg thread so the

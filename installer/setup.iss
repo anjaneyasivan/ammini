@@ -19,14 +19,14 @@ AppId={{94CEFD6D-E0A1-4474-853F-E1D3AF4A9E93}
 AppName=Ammini
 AppVersion={#MyAppVersion}
 AppPublisher=Ammini
-; Fixed per-user install under %LOCALAPPDATA%\Programs: no admin rights and no
-; UAC prompt on install, upgrade or uninstall.
-DefaultDirName={localappdata}\Programs\Ammini
+; Fixed machine-wide install under C:\Program Files; requires admin (UAC prompt).
+DefaultDirName={commonpf64}\Ammini
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 DefaultGroupName=Ammini
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=output
 OutputBaseFilename=Ammini-{#MyAppVersion}-Setup
 Compression=lzma2

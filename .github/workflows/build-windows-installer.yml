@@ -7,6 +7,12 @@ name: Build Windows installer (staging)
 # release job. Run it manually:
 #   gh workflow run build-windows-installer.yml --ref main
 #
+# The installer (and the packaged ammini.exe) is code-signed: with the real
+# certificate in the WINDOWS_CERT_PFX_BASE64 / WINDOWS_CERT_PASSWORD secrets when
+# present, otherwise with a throwaway self-signed certificate so the signing path
+# is still exercised. A self-signed certificate does NOT give SmartScreen
+# reputation — only a CA-issued one makes a public install hassle-free.
+#
 # The version passed to the installer comes from Cargo.toml, not the ref: on
 # workflow_dispatch `github.ref_name` is a branch, not a version.
 
@@ -73,6 +79,58 @@ jobs:
           $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
           "version=$version" >> $env:GITHUB_OUTPUT
 
+      # Sign the staged exe before Inno packages it, so the installed
+      # ammini.exe is signed too. Uses WINDOWS_CERT_PFX_BASE64/PASSWORD when
+      # present; otherwise generates a throwaway self-signed cert (dry run).
+      - name: Prepare signing certificate
+        shell: pwsh
+        env:
+          CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          if (-not $signtool) { throw "signtool.exe not found" }
+          "SIGNTOOL=$signtool" >> $env:GITHUB_ENV
+
+          if ($env:CERT_PFX_BASE64) {
+            $pfx = Join-Path $env:RUNNER_TEMP "ammini.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_PFX_BASE64))
+            $password = $env:CERT_PASSWORD
+            Write-Host "Signing with the certificate from repository secrets."
+          } else {
+            # No certificate configured: generate a throwaway self-signed one so
+            # the signing path is still exercised. It is NOT trusted by end users
+            # and gives NO SmartScreen reputation — only a CA-issued code-signing
+            # certificate makes a public install hassle-free. Testers can trust
+            # this one with installer/trust-ammini-dev.ps1.
+            Write-Warning "WINDOWS_CERT_PFX_BASE64 is unset; generating an ephemeral self-signed certificate."
+            $password = [Guid]::NewGuid().ToString("N")
+            $pfx = Join-Path $env:RUNNER_TEMP "ammini-dev.pfx"
+            $cert = New-SelfSignedCertificate -Type CodeSigningCert `
+              -Subject "CN=Ammini Dry Run" `
+              -FriendlyName "Ammini dry-run code signing" `
+              -CertStoreLocation Cert:\CurrentUser\My `
+              -KeyUsage DigitalSignature `
+              -KeyExportPolicy Exportable `
+              -NotAfter (Get-Date).AddYears(1)
+            Export-PfxCertificate -Cert $cert -FilePath $pfx `
+              -Password (ConvertTo-SecureString $password -AsPlainText -Force) | Out-Null
+            Export-Certificate -Cert $cert -FilePath "$env:RUNNER_TEMP\Ammini-dry-run.cer" | Out-Null
+            "SELF_SIGNED=1" >> $env:GITHUB_ENV
+          }
+          "::add-mask::$password"
+          "CERT_PFX=$pfx" >> $env:GITHUB_ENV
+          "CERT_PASSWORD=$password" >> $env:GITHUB_ENV
+
+      - name: Sign ammini.exe
+        shell: pwsh
+        run: |
+          & $env:SIGNTOOL sign /fd SHA256 /f $env:CERT_PFX /p $env:CERT_PASSWORD `
+            /tr http://timestamp.digicert.com /td SHA256 dist\Ammini-x64\ammini.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup -y --no-progress
@@ -85,12 +143,28 @@ jobs:
             installer\setup.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Sign and verify installer
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem installer\output\*.exe | Select-Object -First 1).FullName
+          & $env:SIGNTOOL sign /fd SHA256 /f $env:CERT_PFX /p $env:CERT_PASSWORD `
+            /tr http://timestamp.digicert.com /td SHA256 $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $env:SIGNTOOL verify /pa /v $exe
+          if ($LASTEXITCODE -ne 0 -and -not $env:SELF_SIGNED) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) { Write-Warning "verify failed (expected for an untrusted self-signed cert)" }
+
       - name: Upload installer
         if: success()
         uses: actions/upload-artifact@v4
         with:
+          # Includes the throwaway cert + trust helper when the run self-signs;
+          # both are simply absent-safe when a real certificate is configured.
           name: Ammini-${{ steps.package.outputs.version }}-Setup
-          path: installer/output/*.exe
+          path: |
+            installer/output/*.exe
+            installer/trust-ammini-dev.ps1
+            ${{ runner.temp }}/Ammini-dry-run.cer
           if-no-files-found: error
 
       - name: Upload build log

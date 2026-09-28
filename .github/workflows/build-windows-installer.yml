@@ -117,7 +117,11 @@ jobs:
               -NotAfter (Get-Date).AddYears(1)
             Export-PfxCertificate -Cert $cert -FilePath $pfx `
               -Password (ConvertTo-SecureString $password -AsPlainText -Force) | Out-Null
-            Export-Certificate -Cert $cert -FilePath "$env:RUNNER_TEMP\Ammini-dry-run.cer" | Out-Null
+            # Ship the public cert + trust helper next to the installer so the
+            # artifact is flat and self-contained.
+            New-Item -ItemType Directory -Force -Path installer\output | Out-Null
+            Export-Certificate -Cert $cert -FilePath "installer\output\Ammini-dry-run.cer" | Out-Null
+            Copy-Item installer\trust-ammini-dev.ps1 installer\output\
             "SELF_SIGNED=1" >> $env:GITHUB_ENV
           }
           "::add-mask::$password"
@@ -167,13 +171,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          # Includes the throwaway cert + trust helper when the run self-signs;
-          # both are simply absent-safe when a real certificate is configured.
+          # Flat, self-contained: the installer, plus the throwaway cert and
+          # trust helper when the run self-signs (absent when a real cert is used).
           name: Ammini-${{ steps.package.outputs.version }}-Setup
-          path: |
-            installer/output/*.exe
-            installer/trust-ammini-dev.ps1
-            ${{ runner.temp }}/Ammini-dry-run.cer
+          path: installer/output/*
           if-no-files-found: error
 
       - name: Upload build log

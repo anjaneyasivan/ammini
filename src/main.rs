@@ -438,22 +438,8 @@ impl AmminiApp {
         }
     }
 
-    /// Handle a newer version from the startup check: ignore it if the user chose
-    /// "Skip this version" for it, otherwise surface the alert and record it.
+    /// Handle a newer version from the startup check: surface the alert and record it.
     fn on_update_available(&mut self, update: UpdateAvailable) {
-        // SAFETY: the skipped-version marker is plain UI data, not a state-machine
-        // invariant (same pattern as recent files / resume positions).
-        let skipped = unsafe {
-            self.fsm
-                .inner_mut()
-                .persistent
-                .update_skipped_version
-                .clone()
-        };
-        if skipped.as_deref() == Some(update.latest.as_str()) {
-            debug!("update {} skipped by the user", update.latest);
-            return;
-        }
         info!("update available: {} -> {}", update.current, update.latest);
         ammini::telemetry::emit(TelemetryEvent::UpdateAvailable {
             current: update.current.clone(),
@@ -475,7 +461,6 @@ impl AmminiApp {
         };
 
         let mut close = false;
-        let mut skip = false;
         egui::Window::new("Update available")
             .collapsible(false)
             .resizable(false)
@@ -497,23 +482,9 @@ impl AmminiApp {
                     if ui.button(icon_label(ui, ICON_CLOSE, "Later")).clicked() {
                         close = true;
                     }
-                    if ui.button("Skip this version").clicked() {
-                        skip = true;
-                    }
                 });
             });
 
-        if skip {
-            // SAFETY: plain UI data, not a state-machine invariant.
-            unsafe {
-                self.fsm.inner_mut().persistent.update_skipped_version = Some(update.latest.clone())
-            };
-            debug!("update {} skipped by the user", update.latest);
-            // Drop the alert entirely for this launch too, so the top-bar chip
-            // disappears with it.
-            self.update = None;
-            close = true;
-        }
         if close {
             self.show_update_dialog = false;
         }
@@ -711,24 +682,8 @@ impl AmminiApp {
             {
                 events.push(e);
             }
-            if ui
-                .button(icon_label(ui, ICON_FOLDER_OPEN, "Open Folder"))
-                .clicked()
-            {
-                events.extend(self.open_folder_dialog());
-            }
             if ui.button(icon_label(ui, ICON_LINK, "Open URL")).clicked() {
                 self.show_url_dialog = true;
-            }
-            ui.separator();
-            if ui
-                .button(icon_label(ui, ICON_SKIP_PREVIOUS, "Prev"))
-                .clicked()
-            {
-                events.push(PlayerEvent::Previous);
-            }
-            if ui.button(icon_label(ui, ICON_SKIP_NEXT, "Next")).clicked() {
-                events.push(PlayerEvent::Next);
             }
             ui.separator();
             if ui

@@ -134,7 +134,6 @@ fn material_icon_font_registers_and_covers_icons() {
         icon_consts::ICON_CHECK,
         icon_consts::ICON_CLOSE,
         icon_consts::ICON_FILE_OPEN,
-        icon_consts::ICON_FOLDER_OPEN,
         icon_consts::ICON_LINK,
         icon_consts::ICON_PLAYLIST_PLAY,
         icon_consts::ICON_SEND,

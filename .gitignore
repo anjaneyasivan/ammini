@@ -4,6 +4,9 @@
 /dist
 .DS_Store
 
+# Inno Setup output (installer/setup.iss)
+/installer/output
+
 # ZCode tool artifacts (local plans + ignore list)
 .zcode/
 .zcodeignore

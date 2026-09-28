@@ -210,7 +210,11 @@ cross-checking, like the macOS job) and attach to the GitHub Release on tag refs
 `gh release upload`.
 
 Packaging strategy: **portable zip first**. An Inno Setup installer (start-menu entry,
-uninstaller) is a nice later addition and doesn't block anything.
+uninstaller) is a nice later addition and doesn't block anything. A staging workflow
+(`.github/workflows/build-windows-installer.yml`, `workflow_dispatch` only) builds the
+installer from `installer/setup.iss` as an artifact — no release attachment — so it can
+be tried out before its steps fold into `build-windows.yml`. The installer is unsigned;
+shipping it publicly needs code-signing first (SmartScreen).
 
 ## Risks & open questions
 

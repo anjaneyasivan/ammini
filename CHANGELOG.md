@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8](https://github.com/anjaneyasivan/ammini/compare/v0.1.7...v0.1.8) - 2026-09-28
+
+### Added
+
+- check for new releases on launch
+
+### Other
+
+- *(ui)* finalize update alert and trim the top bar
+
 ## [0.1.7](https://github.com/anjaneyasivan/ammini/compare/v0.1.6...v0.1.7) - 2026-09-27
 
 ### Fixed

@@ -151,8 +151,17 @@ jobs:
             /tr http://timestamp.digicert.com /td SHA256 $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $env:SIGNTOOL verify /pa /v $exe
-          if ($LASTEXITCODE -ne 0 -and -not $env:SELF_SIGNED) { exit $LASTEXITCODE }
-          if ($LASTEXITCODE -ne 0) { Write-Warning "verify failed (expected for an untrusted self-signed cert)" }
+          if ($LASTEXITCODE -ne 0) {
+            if ($env:SELF_SIGNED) {
+              # Expected: a self-signed cert is not in the machine's trusted roots.
+              Write-Warning "verify failed (expected for an untrusted self-signed cert)"
+            } else {
+              exit $LASTEXITCODE
+            }
+          }
+          # GitHub's pwsh wrapper exits with $LASTEXITCODE, so clear the (expected)
+          # non-zero verify code before the step ends.
+          exit 0
 
       - name: Upload installer
         if: success()

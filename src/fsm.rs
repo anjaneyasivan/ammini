@@ -50,6 +50,10 @@ pub struct PersistentState {
     /// message via its chat + message ids.
     #[serde(default)]
     pub recent_telegram: Vec<RecentTelegram>,
+    /// Release version the user chose to "Skip" in the update alert, so that alert is
+    /// not shown again for that version (a newer one still shows).
+    #[serde(default)]
+    pub update_skipped_version: Option<String>,
 }
 
 pub struct PlayerFsm {

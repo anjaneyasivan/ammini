@@ -145,6 +145,7 @@ fn material_icon_font_registers_and_covers_icons() {
         icon_consts::ICON_LOGIN,
         icon_consts::ICON_EXPAND_MORE,
         icon_consts::ICON_LOGOUT,
+        icon_consts::ICON_SYSTEM_UPDATE,
     ] {
         let c = icon.codepoint.chars().next().unwrap();
         assert!(

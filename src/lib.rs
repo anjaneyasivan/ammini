@@ -5,3 +5,4 @@ pub mod proxy;
 pub mod style;
 pub mod telegram;
 pub mod telemetry;
+pub mod update;

@@ -79,6 +79,11 @@ pub enum TelemetryEvent {
     AppStarted {
         version: String,
     },
+    /// The startup release check found a newer version than the one running.
+    UpdateAvailable {
+        current: String,
+        latest: String,
+    },
     TelegramSignedIn,
     TelegramSignedOut {
         reason: SignOutReason,
@@ -509,6 +514,15 @@ impl TelemetryEvent {
                 Severity::Info,
                 "Ammini started",
                 vec![KeyValue::new("version", version.clone())],
+            ),
+            TelemetryEvent::UpdateAvailable { current, latest } => (
+                "update.available",
+                Severity::Info,
+                "New Ammini version available",
+                vec![
+                    KeyValue::new("current", current.clone()),
+                    KeyValue::new("latest", latest.clone()),
+                ],
             ),
             TelemetryEvent::TelegramSignedIn => (
                 "telegram.signed_in",

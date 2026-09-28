@@ -8,6 +8,7 @@ use ammini::telegram::panel::TelegramPanel;
 use ammini::telegram::state_machine::{TelegramEvent, TelegramFsm};
 use ammini::telegram::{BgCommand, UiMessage, start};
 use ammini::telemetry::{Metric, SeekTracker, TelemetryEvent};
+use ammini::update::UpdateAvailable;
 use eframe::{App, Frame, NativeOptions, egui};
 use egui_material_icons::{MaterialIcon, icons::*};
 use egui_sharkplayer::{PlayerState, SharkPlayer};
@@ -115,6 +116,14 @@ struct AmminiApp {
     /// cached byte ranges), refreshed once per second by the bg thread so the
     /// seekbar can shade the cached parts.
     cache_coverage: HashMap<i32, CacheCoverage>,
+    /// Startup release check (see `ammini::update`). Drained each frame; carries at
+    /// most one newer version per launch.
+    update_rx: UnboundedReceiver<UpdateAvailable>,
+    /// A newer release reported by the startup check, if any (kept so the top bar
+    /// can reopen the alert after it is dismissed).
+    update: Option<UpdateAvailable>,
+    /// Whether the update alert window is currently shown.
+    show_update_dialog: bool,
 }
 
 /// Byte coverage of a Telegram video's disk block cache as published by the bg
@@ -175,6 +184,10 @@ impl AmminiApp {
         let mut telegram_fsm = TelegramFsm::new().state_machine();
         telegram_fsm.init();
 
+        // One-shot release check (notification only). Started here, not in `main`,
+        // so it can wake the UI with `request_repaint` when it finds an update.
+        let update_rx = ammini::update::start(cc.egui_ctx.clone());
+
         let mut app = Self {
             fsm,
             url_input: String::new(),
@@ -192,6 +205,9 @@ impl AmminiApp {
             pending_seek: Arc::new(std::sync::Mutex::new(None)),
             display_sleep: ammini::display_sleep::Guard::new(),
             cache_coverage: HashMap::new(),
+            update_rx,
+            update: None,
+            show_update_dialog: false,
         };
         app.fsm.init();
         info!("app initialized");
@@ -419,6 +435,87 @@ impl AmminiApp {
         if close {
             self.show_url_dialog = false;
             self.url_input.clear();
+        }
+    }
+
+    /// Handle a newer version from the startup check: ignore it if the user chose
+    /// "Skip this version" for it, otherwise surface the alert and record it.
+    fn on_update_available(&mut self, update: UpdateAvailable) {
+        // SAFETY: the skipped-version marker is plain UI data, not a state-machine
+        // invariant (same pattern as recent files / resume positions).
+        let skipped = unsafe {
+            self.fsm
+                .inner_mut()
+                .persistent
+                .update_skipped_version
+                .clone()
+        };
+        if skipped.as_deref() == Some(update.latest.as_str()) {
+            debug!("update {} skipped by the user", update.latest);
+            return;
+        }
+        info!("update available: {} -> {}", update.current, update.latest);
+        ammini::telemetry::emit(TelemetryEvent::UpdateAvailable {
+            current: update.current.clone(),
+            latest: update.latest.clone(),
+        });
+        self.update = Some(update);
+        self.show_update_dialog = true;
+    }
+
+    /// The launch "new version available" alert. Notification only: "Get update"
+    /// opens the GitHub Release in the browser; Ammini never replaces its own files.
+    fn handle_update_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_update_dialog {
+            return;
+        }
+        let Some(update) = self.update.clone() else {
+            self.show_update_dialog = false;
+            return;
+        };
+
+        let mut close = false;
+        let mut skip = false;
+        egui::Window::new("Update available")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(format!("Ammini {} is available.", update.latest));
+                ui.label(format!("You're running {}.", update.current));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(icon_label(ui, ICON_SYSTEM_UPDATE, "Get update"))
+                        .clicked()
+                    {
+                        if let Err(e) = open_in_browser(&update.url) {
+                            tracing::warn!("failed to open {}: {e}", update.url);
+                        }
+                        close = true;
+                    }
+                    if ui.button(icon_label(ui, ICON_CLOSE, "Later")).clicked() {
+                        close = true;
+                    }
+                    if ui.button("Skip this version").clicked() {
+                        skip = true;
+                    }
+                });
+            });
+
+        if skip {
+            // SAFETY: plain UI data, not a state-machine invariant.
+            unsafe {
+                self.fsm.inner_mut().persistent.update_skipped_version = Some(update.latest.clone())
+            };
+            debug!("update {} skipped by the user", update.latest);
+            // Drop the alert entirely for this launch too, so the top-bar chip
+            // disappears with it.
+            self.update = None;
+            close = true;
+        }
+        if close {
+            self.show_update_dialog = false;
         }
     }
 
@@ -727,6 +824,16 @@ impl AmminiApp {
                 unsafe { &mut self.fsm.inner_mut().persistent.resume }.clear();
             }
 
+            if let Some(update) = self.update.clone()
+                && !self.show_update_dialog
+                && ui
+                    .button(icon_label(ui, ICON_SYSTEM_UPDATE, "Update"))
+                    .on_hover_text(format!("Ammini {} is available", update.latest))
+                    .clicked()
+            {
+                self.show_update_dialog = true;
+            }
+
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add(egui::Label::new(&self.fsm.status).truncate());
             });
@@ -841,9 +948,14 @@ impl App for AmminiApp {
             );
         }
 
+        while let Ok(update) = self.update_rx.try_recv() {
+            self.on_update_available(update);
+        }
+
         self.handle_dropped_files(&ctx, &mut events);
         self.handle_shortcuts(&ctx, &mut events);
         self.handle_url_dialog(ui, &mut events);
+        self.handle_update_dialog(&ctx);
         self.refresh_tracks();
 
         egui::Panel::top("top_bar").show(ui, |ui| {
@@ -963,6 +1075,33 @@ fn truncate_path(path: &str) -> String {
 /// Base name of a media path, for telemetry — never full paths.
 fn path_basename(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned()
+}
+
+/// Open a URL in the system browser. Spawning the platform launcher directly
+/// avoids pulling a browser crate (and the `egui-winit` `links` feature, which
+/// isn't enabled) just for the update alert.
+fn open_in_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.arg(url);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        // The empty title argument keeps `start` from treating the URL as a window
+        // title when it is quoted.
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]).arg(url);
+        c
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+    command.spawn().map(|_| ())
 }
 
 fn main() {

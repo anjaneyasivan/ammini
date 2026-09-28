@@ -33,6 +33,11 @@ Telegram account.
   videos, since the cache maps bytes, not time), and a dimmed **loading spinner**
   overlays the video while a Telegram file's initial load is in progress.
 - Material Design icons on all buttons, Material icons for the on-video control bar.
+- **New-version alert on launch**: Ammini fetches a small manifest from its GitHub
+  Pages site (published by the website deploy workflow alongside the download
+  buttons) and, when a newer release exists, shows a one-click alert linking to the
+  GitHub Release. It is notification-only — the app never downloads or installs
+  updates itself. Point `AMMINI_UPDATE_URL` at another manifest to test.
 - **Native-feeling macOS UI**: Inter font, system light/dark appearance, chat list
   cards with avatar circles, and iMessage-style message bubbles (right-aligned accent
   for your own messages, grouped by sender with timestamps at group starts).
@@ -213,7 +218,8 @@ files and Telegram videos), audio-track switches, playback errors, panics,
 background Telegram/proxy errors, and metrics (download speed — sampled twice a
 second per stream — plus block-cache hit/miss, video counters, and seek latency:
 the time from an arrow / J / L / skip-button seek until playback resumes past the
-seek target).
+seek target). The launch release check also reports when a newer version is
+available (running and latest version strings only).
 
 Telemetry is **off by default** and only activates when both of these are present in
 `.env` (resolved like the Telegram credentials: environment → `.env` → baked into the

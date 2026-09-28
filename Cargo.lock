@@ -84,6 +84,7 @@ dependencies = [
  "reqwest",
  "rfd",
  "rustls",
+ "semver",
  "sentry",
  "serde",
  "serde_json",

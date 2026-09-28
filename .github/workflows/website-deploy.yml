@@ -57,6 +57,26 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Latest complete release tag: ${tag:-<none, download buttons will link to the releases page>}"
 
+      # Publish the release-check manifest the desktop app fetches at launch
+      # (src/update.rs). Written from the same "latest complete release" tag the
+      # download buttons use, so the app never advertises a version whose
+      # binaries are still uploading. When no complete release exists yet the
+      # checked-in fallback in website/static/update.json is deployed instead.
+      - name: Write update manifest
+        if: steps.release.outputs.tag != ''
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          version="${TAG#v}"
+          jq -n \
+            --arg version "$version" \
+            --arg tag "$TAG" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
+            --arg published_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version: $version, tag: $tag, url: $url, published_at: $published_at}' \
+            > website/static/update.json
+          cat website/static/update.json
+
       - name: Build
         run: bun run build
         working-directory: website

@@ -44,6 +44,7 @@
 				class="transition hover:text-gold-300">Docs</a
 			>
 			<a href="{base}/privacy" class="transition hover:text-gold-300">Privacy</a>
+			<a href="{base}/child-safety" class="transition hover:text-gold-300">Child Safety</a>
 		</nav>
 
 		<p class="font-malayalam text-sm text-cream-600">അമ്മിണി</p>

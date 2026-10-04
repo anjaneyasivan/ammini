@@ -43,6 +43,7 @@
 				rel="noreferrer"
 				class="transition hover:text-gold-300">Docs</a
 			>
+			<a href="{base}/privacy" class="transition hover:text-gold-300">Privacy</a>
 		</nav>
 
 		<p class="font-malayalam text-sm text-cream-600">അമ്മിണി</p>

@@ -11,7 +11,10 @@ use grammers_client::peer::User;
 use grammers_client::sender::SenderPool;
 use grammers_session::storages::SqliteSession;
 use grammers_session::updates::UpdatesLike;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::telegram::config::TelegramConfig;
@@ -28,6 +31,11 @@ pub type UpdatesReceiver = UnboundedReceiver<UpdatesLike>;
 /// File extensions treated as playable video. Some files (e.g. `.mkv` sent as a plain
 /// attachment) carry no Telegram video attributes, so we fall back on the file name.
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
+
+/// How long a refetched document is reused for other block downloads of the same video
+/// before another expiry would be refetched. Covers a streaming window (4 prefetched
+/// blocks plus the one in flight) comfortably.
+const REFRESH_REUSE_AFTER: Duration = Duration::from_secs(60);
 
 /// Wrapper around the grammers Client providing high-level async operations.
 pub struct TelegramClient {
@@ -142,11 +150,11 @@ impl TelegramClient {
 /// be served from synthetic sources in offline tests instead of a live client.
 /// (Methods return boxed futures rather than RPITIT so the trait stays `dyn`-compatible.)
 pub trait VideoSource: Send + Sync {
-    /// Download the whole block `block` (the final block of the file may be shorter if
-    /// the file size is not a multiple of the block size).
+    /// Download the whole block `block` of `video` (the final block of the file may be
+    /// shorter if the file size is not a multiple of the block size).
     fn download_block<'a>(
         &'a self,
-        document: &'a Document,
+        video: &'a VideoDownloadInfo,
         block: u64,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<Vec<u8>, anyhow::Error>> + Send + 'a>,
@@ -154,25 +162,131 @@ pub trait VideoSource: Send + Sync {
 }
 
 /// Real [`VideoSource`] backed by a grammers client's chunked download iterator.
+///
+/// Holds a handle to the video registry so a document refreshed mid-download (see
+/// [`download_block`]) is written back for subsequent range requests. `refreshed`
+/// remembers recently refreshed documents and `refresh_gate` serializes the refetches, so
+/// the burst of blocks that fails together on one expired reference costs a single
+/// `get_messages_by_id` rather than one per block.
 pub struct GrammersVideoSource {
     pub client: Client,
+    pub registry: Arc<Mutex<HashMap<i32, VideoDownloadInfo>>>,
+    /// msg_id -> (when it was refreshed, the fresh document).
+    refreshed: Arc<Mutex<HashMap<i32, (Instant, Document)>>>,
+    /// Held across a refetch so only one `get_messages_by_id` runs at a time.
+    refresh_gate: Arc<Mutex<()>>,
+}
+
+impl GrammersVideoSource {
+    pub fn new(client: Client, registry: Arc<Mutex<HashMap<i32, VideoDownloadInfo>>>) -> Self {
+        Self {
+            client,
+            registry,
+            refreshed: Arc::new(Mutex::new(HashMap::new())),
+            refresh_gate: Arc::new(Mutex::new(())),
+        }
+    }
 }
 
 impl VideoSource for GrammersVideoSource {
     fn download_block<'a>(
         &'a self,
-        document: &'a Document,
+        video: &'a VideoDownloadInfo,
         block: u64,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<Vec<u8>, anyhow::Error>> + Send + 'a>,
     > {
-        Box::pin(async move { download_block(&self.client, document, block).await })
+        Box::pin(async move { download_block(self, video, block).await })
     }
 }
 
 /// Download a whole block from Telegram via the client's chunked iterator. `skip_chunks`
 /// positions the iterator exactly at block `block`.
+///
+/// Telegram expires a document's `file_reference` after a few hours, and grammers-client
+/// does not refresh it (`files.rs`: "TODO handle maybe FILEREF_UPGRADE_NEEDED"), so a
+/// long-lived registry entry eventually fails every request with
+/// `FILE_REFERENCE_EXPIRED`/`FILE_REFERENCE_INVALID`. When that happens the document is
+/// re-fetched from the message (yielding a fresh reference) and the block is retried once.
 pub async fn download_block(
+    source: &GrammersVideoSource,
+    video: &VideoDownloadInfo,
+    block: u64,
+) -> Result<Vec<u8>, anyhow::Error> {
+    match download_block_once(&source.client, &video.document, block).await {
+        Ok(chunk) => Ok(chunk),
+        Err(e) if e.is::<ExpiredFileReference>() => {
+            tracing::warn!(
+                "telegram: msg_id={} block {block} hit an expired file reference ({e:#}); \
+                 refetching the document",
+                video.msg_id
+            );
+            match refreshed_document(source, video).await {
+                Ok(document) => download_block_once(&source.client, &document, block)
+                    .await
+                    .map_err(|retry| {
+                        anyhow::anyhow!("block {block}: retry after refetch failed: {retry}")
+                    }),
+                Err(refresh_err) => Err(anyhow::anyhow!(
+                    "block {block}: could not refresh document for msg_id={}: {refresh_err}",
+                    video.msg_id
+                )),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// A document refetched recently enough to reuse, fetching a new one only if this is the
+/// first request since the expiry. Concurrent callers queue on the gate and the loser of
+/// the race finds the winner's document waiting, so one expiry costs one RPC.
+async fn refreshed_document(
+    source: &GrammersVideoSource,
+    video: &VideoDownloadInfo,
+) -> Result<Document, anyhow::Error> {
+    if let Some(document) = recently_refreshed(source, video.msg_id).await {
+        return Ok(document);
+    }
+    let _gate = source.refresh_gate.lock().await;
+    // Someone may have refreshed while we waited for the gate.
+    if let Some(document) = recently_refreshed(source, video.msg_id).await {
+        return Ok(document);
+    }
+
+    let fresh = fetch_video_info(&source.client, video.peer, video.msg_id).await?;
+    tracing::info!("telegram: msg_id={} document refetched", video.msg_id);
+    source
+        .registry
+        .lock()
+        .await
+        .insert(video.msg_id, fresh.clone());
+    source
+        .refreshed
+        .lock()
+        .await
+        .insert(video.msg_id, (Instant::now(), fresh.document.clone()));
+    Ok(fresh.document)
+}
+
+/// The cached refresh for `msg_id`, if one happened inside [`REFRESH_REUSE_AFTER`].
+///
+/// Without this window, blocks streaming concurrently would each refetch: they hold the
+/// stale document and all fail at once, but only one refetch is ever needed.
+async fn recently_refreshed(source: &GrammersVideoSource, msg_id: i32) -> Option<Document> {
+    let mut refreshed = source.refreshed.lock().await;
+    match refreshed.get(&msg_id) {
+        Some((at, document)) if at.elapsed() < REFRESH_REUSE_AFTER => Some(document.clone()),
+        Some(_) => {
+            refreshed.remove(&msg_id);
+            None
+        }
+        None => None,
+    }
+}
+
+/// Download a whole block from Telegram via the client's chunked iterator. `skip_chunks`
+/// positions the iterator exactly at block `block`.
+async fn download_block_once(
     client: &Client,
     document: &Document,
     block: u64,
@@ -187,25 +301,49 @@ pub async fn download_block(
         Ok(None) => Err(anyhow::anyhow!(
             "block {block}: telegram download returned no data"
         )),
-        Err(e) => Err(anyhow::anyhow!(
-            "block {block}: telegram download failed: {e}"
-        )),
+        Err(e) => {
+            // File-reference expiry is an RPC error we can recover from by refetching the
+            // message; tag it so the caller knows to try exactly once more.
+            let reason = match &e {
+                grammers_client::InvocationError::Rpc(rpc)
+                    if rpc.code == 400 && rpc.name.starts_with("FILE_REFERENCE") =>
+                {
+                    return Err(anyhow::Error::new(ExpiredFileReference)
+                        .context(format!("block {block}: telegram download failed: {e}")));
+                }
+                _ => format!("block {block}: telegram download failed: {e}"),
+            };
+            Err(anyhow::anyhow!(reason))
+        }
     }
 }
 
+/// Marker for a Telegram `FILE_REFERENCE_*` RPC error, which a document refetch fixes.
+/// Typed so callers can match on it without string-matching the error text.
+#[derive(Debug)]
+struct ExpiredFileReference;
+
+impl std::fmt::Display for ExpiredFileReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "expired file reference")
+    }
+}
+
+impl std::error::Error for ExpiredFileReference {}
+
 /// Fetch a single message by id and build its [`VideoDownloadInfo`]. Used to replay a
-/// recently played video after its registry entry was cleared (chat switch/sign-out).
+/// recently played video after its registry entry was cleared (chat switch/sign-out),
+/// and to refresh a document whose `file_reference` expired mid-playback.
 /// `peer` must carry the session's authority for the chat (e.g. the `PeerRef` stored
 /// when the video was first played) — an ambient/default-authority ref is rejected for
 /// channels.
 pub async fn fetch_video_info(
-    client: &TelegramClient,
+    client: &Client,
     peer: PeerRef,
     msg_id: i32,
 ) -> Result<VideoDownloadInfo, anyhow::Error> {
     let chat_id = peer.id.bot_api_dialog_id().unwrap_or(0);
     let mut fetched = client
-        .inner()
         .get_messages_by_id(peer, &[msg_id])
         .await
         .map_err(|e| anyhow::anyhow!("failed to fetch message {msg_id}: {e}"))?;
@@ -213,7 +351,7 @@ pub async fn fetch_video_info(
         .pop()
         .flatten()
         .ok_or_else(|| anyhow::anyhow!("message {msg_id} not found"))?;
-    let (is_video, video) = extract_video(&msg, chat_id);
+    let (is_video, video) = extract_video(&msg, chat_id, Some(peer));
     let video = video.ok_or_else(|| anyhow::anyhow!("message {msg_id} contains no video"))?;
     if !is_video || video.size == 0 {
         return Err(anyhow::anyhow!(
@@ -313,11 +451,14 @@ pub async fn next_dialogs_page(
 
 /// Fetch the next page of messages from the iterator.
 /// Returns (messages, videos, has_more). Messages are newest-first.
+/// `peer` is the chat being paged; it is attached to any videos found so their documents
+/// can be refetched later (see [`VideoDownloadInfo::peer`]).
 pub async fn next_messages_page(
     iter: &mut MessageIter,
     page_size: usize,
     chat_id: i64,
     self_user_id: Option<i64>,
+    peer: PeerRef,
 ) -> Result<(Vec<MessageInfo>, Vec<VideoDownloadInfo>, bool)> {
     let mut messages = Vec::with_capacity(page_size);
     let mut videos = Vec::new();
@@ -326,7 +467,7 @@ pub async fn next_messages_page(
     for _ in 0..page_size {
         match iter.next().await {
             Ok(Some(msg)) => {
-                let (info, video) = map_message(&msg, chat_id, self_user_id);
+                let (info, video) = map_message(&msg, chat_id, self_user_id, Some(peer));
                 messages.push(info);
                 if let Some(v) = video {
                     videos.push(v);
@@ -371,10 +512,15 @@ fn map_dialog(dialog: &grammers_client::peer::Dialog) -> DialogInfo {
     }
 }
 
+/// Map one incoming message for the UI. `peer` is the chat's `PeerRef` when the caller
+/// has it (the open chat); a video is only reported when it is known, because the
+/// registry entry needs the access hash to refetch the document later (see
+/// [`VideoDownloadInfo::peer`]).
 pub(crate) fn map_message(
     msg: &grammers_client::message::Message,
     chat_id: i64,
     self_user_id: Option<i64>,
+    peer: Option<PeerRef>,
 ) -> (MessageInfo, Option<VideoDownloadInfo>) {
     let sender = msg
         .sender()
@@ -389,7 +535,7 @@ pub(crate) fn map_message(
     let text = msg.text().to_string();
     let time = format_datetime(&msg.date());
 
-    let (has_video, video) = extract_video(msg, chat_id);
+    let (has_video, video) = extract_video(msg, chat_id, peer);
 
     // Parse the file name once here (background thread) so the UI never re-parses per
     // frame; the document supplies the size/duration the parser can't know.
@@ -414,10 +560,14 @@ pub(crate) fn map_message(
     )
 }
 
-/// Detect if a message contains a playable video document.
+/// Detect if a message contains a playable video document. The document is only returned
+/// when `peer` (the chat's `PeerRef`, carrying the access hash) is known, since the
+/// registry entry needs it to refetch the video later; the `bool` reports playability
+/// either way, so the UI can still render the attachment.
 fn extract_video(
     msg: &grammers_client::message::Message,
     chat_id: i64,
+    peer: Option<PeerRef>,
 ) -> (bool, Option<VideoDownloadInfo>) {
     let media = match msg.media() {
         Some(m) => m,
@@ -445,15 +595,15 @@ fn extract_video(
     let size = doc.size().unwrap_or(0);
     let msg_id = msg.id();
 
-    (
-        true,
-        Some(VideoDownloadInfo {
-            msg_id,
-            chat_id,
-            document: doc.clone(),
-            size,
-        }),
-    )
+    let video = peer.map(|peer| VideoDownloadInfo {
+        msg_id,
+        chat_id,
+        peer,
+        document: doc.clone(),
+        size,
+    });
+
+    (true, video)
 }
 
 /// Returns true if the filename ends with a known video extension (case-insensitive).
@@ -496,7 +646,7 @@ pub async fn find_first_hevc_video(
             let mut messages_iter = client.iter_messages(peer);
             loop {
                 let (_, videos, has_more_messages) =
-                    next_messages_page(&mut messages_iter, MESSAGE_PAGE_SIZE, chat_id, None)
+                    next_messages_page(&mut messages_iter, MESSAGE_PAGE_SIZE, chat_id, None, peer)
                         .await?;
                 if let Some(video) = videos.into_iter().find(is_hevc_video) {
                     return Ok(Some((peer, video)));
@@ -548,6 +698,10 @@ pub struct MessageInfo {
 pub struct VideoDownloadInfo {
     pub msg_id: i32,
     pub chat_id: i64,
+    /// The chat this video came from, including the session's access hash. Kept so the
+    /// document can be refetched when Telegram expires its `file_reference` (see
+    /// [`download_block`]); a bare dialog id would be rejected for channels.
+    pub peer: PeerRef,
     pub document: Document,
     pub size: usize,
 }

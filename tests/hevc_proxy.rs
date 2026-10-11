@@ -82,7 +82,7 @@ async fn find_first_hevc_video_and_test_proxy_range() {
 
     // The recent-Telegram replay path refetches with the stored peer (access hash);
     // verify it recovers the same document.
-    let by_id = ammini::telegram::client::fetch_video_info(&client, peer, video.msg_id)
+    let by_id = ammini::telegram::client::fetch_video_info(client.inner(), peer, video.msg_id)
         .await
         .expect("failed to refetch video by id");
     assert_eq!(by_id.msg_id, video.msg_id);
@@ -93,14 +93,21 @@ async fn find_first_hevc_video_and_test_proxy_range() {
     let video_registry = Arc::new(Mutex::new(registry));
     let video_cache: Arc<Mutex<HashMap<i32, BlockCache>>> = Arc::new(Mutex::new(HashMap::new()));
 
-    // Telegram videos are served through the shared disk block cache.
+    // Telegram videos are served through the shared disk block cache. Start from an
+    // empty cache dir: the dir is reused between runs, and a warm cache would let the
+    // checks below pass without ever touching Telegram (notably the expired-reference
+    // case, whose whole point is the download path).
+    let cache_dir = std::env::temp_dir().join("ammini-test-telegram-cache");
+    let _ = std::fs::remove_dir_all(&cache_dir);
+    std::fs::create_dir_all(&cache_dir).expect("failed to create test cache dir");
     let proxy_state = ProxyState {
         reqwest_client: reqwest::Client::new(),
         video_registry: video_registry.clone(),
-        video_source: Arc::new(GrammersVideoSource {
-            client: client.clone_inner(),
-        }),
-        cache_dir: std::env::temp_dir().join("ammini-test-telegram-cache"),
+        video_source: Arc::new(GrammersVideoSource::new(
+            client.clone_inner(),
+            video_registry.clone(),
+        )),
+        cache_dir: cache_dir.clone(),
         video_cache: video_cache.clone(),
     };
 
@@ -180,4 +187,49 @@ async fn find_first_hevc_video_and_test_proxy_range() {
     assert_eq!(res.status(), reqwest::StatusCode::PARTIAL_CONTENT);
     let body = res.bytes().await.unwrap();
     assert_eq!(body.len() as u64, tail_len);
+
+    // 5. An expired `file_reference` must not kill playback. Telegram expires the
+    // reference on the document, and grammers-client never refreshes it, so a
+    // long-lived registry entry eventually fails every block download. Poison the
+    // document to emulate that and assert the source refetches the message and retries:
+    // without the refresh the range below returns a 206 with an empty body.
+    {
+        let mut stale = video.clone();
+        match stale.document.raw.document.as_mut() {
+            Some(grammers_client::tl::enums::Document::Document(d)) => {
+                d.file_reference = vec![0xAB; d.file_reference.len()];
+            }
+            other => panic!("unexpected document variant: {other:?}"),
+        }
+        video_registry.lock().await.insert(stale.msg_id, stale);
+
+        // A small byte range well past anything the previous steps cached, so
+        // this block is missing and the download path runs.
+        let probe_start = video.size as u64 / 2;
+        let probe_end = (probe_start + 64 * 1024 - 1).min(video.size as u64 - 1);
+        let res = http
+            .get(&base)
+            .header("Range", format!("bytes={probe_start}-{probe_end}"))
+            .timeout(Duration::from_secs(60))
+            .send()
+            .await
+            .expect("probe range request failed");
+        assert_eq!(res.status(), reqwest::StatusCode::PARTIAL_CONTENT);
+        let body = res.bytes().await.unwrap();
+        assert_eq!(
+            body.len() as u64,
+            probe_end + 1 - probe_start,
+            "expired file reference was not refreshed: short/empty body"
+        );
+
+        // The refreshed document must have replaced the poisoned one in the registry,
+        // so a repeat request is served from the cache rather than re-fetching.
+        let refreshed = video_registry
+            .lock()
+            .await
+            .get(&video.msg_id)
+            .unwrap()
+            .clone();
+        assert_ne!(refreshed.document.raw, video.document.raw);
+    }
 }

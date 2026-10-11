@@ -23,7 +23,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, warn};
 
 use crate::telegram::UiMessage;
-use crate::telegram::client::{self, TelegramClient, UpdatesReceiver, VideoDownloadInfo};
+use crate::telegram::client::{self, PeerRef, TelegramClient, UpdatesReceiver, VideoDownloadInfo};
 
 /// How many updates the client may buffer before dropping them. The library default is
 /// 100; subscribed channels can burst, so keep headroom (the listener drains promptly).
@@ -42,7 +42,7 @@ pub fn spawn_listener(
     client: Arc<TelegramClient>,
     updates: UpdatesReceiver,
     self_user_id: Arc<AtomicI64>,
-    selected_chat_id: Arc<AtomicI64>,
+    selected_peer: Arc<Mutex<Option<PeerRef>>>,
     video_registry: Arc<Mutex<HashMap<i32, VideoDownloadInfo>>>,
     ui_tx: UnboundedSender<UiMessage>,
 ) {
@@ -66,7 +66,7 @@ pub fn spawn_listener(
                     forward_message(
                         &message,
                         &self_user_id,
-                        &selected_chat_id,
+                        &selected_peer,
                         &video_registry,
                         &ui_tx,
                     )
@@ -87,7 +87,7 @@ pub fn spawn_listener(
 async fn forward_message(
     message: &Message,
     self_user_id: &AtomicI64,
-    selected_chat_id: &AtomicI64,
+    selected_peer: &Mutex<Option<PeerRef>>,
     video_registry: &Mutex<HashMap<i32, VideoDownloadInfo>>,
     ui_tx: &UnboundedSender<UiMessage>,
 ) {
@@ -95,14 +95,22 @@ async fn forward_message(
     let self_id = self_user_id.load(Ordering::Relaxed);
     let self_id = (self_id != UNSET).then_some(self_id);
 
-    let (info, video) = client::map_message(message, chat_id, self_id);
+    // An update carries only a `PeerId`, but registering a video needs the `PeerRef` so
+    // its document can be refetched when Telegram expires the file reference. Only the
+    // open chat has one, so a non-matching (or absent) peer means this message's video
+    // is not for the open chat and must not enter the registry.
+    let peer = match *selected_peer.lock().await {
+        Some(peer) if peer.id.bot_api_dialog_id() == Some(chat_id) => Some(peer),
+        _ => None,
+    };
+
+    let (info, video) = client::map_message(message, chat_id, self_id, peer);
 
     // Register playable documents only for the open chat: the registry is cleared on
     // chat switch and holds the current chat's videos, so clicking Play on a live
-    // message works. Videos from other chats would just be dropped on the next switch.
-    if let Some(video) = &video
-        && selected_chat_id.load(Ordering::Relaxed) == chat_id
-    {
+    // message works. Videos from other chats would just be dropped on the next switch
+    // (the peer check above is what enforces "only the open chat").
+    if let Some(video) = &video {
         video_registry
             .lock()
             .await

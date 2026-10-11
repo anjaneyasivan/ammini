@@ -9,7 +9,8 @@
 //! Concurrent range requests for the same video cooperate: the first request downloads
 //! a missing block from Telegram, writes it to disk, and notifies the others, which then
 //! read it from the file instead of re-downloading. A failed download is recorded so all
-//! waiters fail fast instead of retrying in a loop.
+//! waiters fail fast instead of retrying in a loop — but only for [`FAILED_RETRY_AFTER`],
+//! after which the block is retried so a transient failure can heal on its own.
 //!
 //! Waiter coordination uses a monotonic [`watch`] version counter rather than a raw
 //! [`Notify`](tokio::sync::Notify): the current value is always readable, so a waiter
@@ -69,6 +70,31 @@ pub fn byte_ranges_to_time_spans(
         .collect()
 }
 
+/// How long a failed block download is remembered before the block is retried. Long
+/// enough to keep a burst of waiters from hammering Telegram with the same doomed
+/// request, short enough that a refreshed document or a recovered connection resumes
+/// playback on its own.
+const FAILED_RETRY_AFTER: Duration = Duration::from_secs(30);
+
+/// A recorded block download failure. `at` is wall-clock (not `Instant`): it only feeds a
+/// cooldown comparison, so a clock adjustment can at worst shift a retry by a little.
+#[derive(Clone)]
+struct Failure {
+    error: String,
+    at: SystemTime,
+}
+
+impl Failure {
+    /// Whether this failure is still inside the retry cooldown. A timestamp in the
+    /// future (clock moved backwards) counts as expired, so a wall-clock jump can never
+    /// leave a block stuck behind its cooldown.
+    fn is_fresh(&self) -> bool {
+        SystemTime::now()
+            .duration_since(self.at)
+            .is_ok_and(|age| age < FAILED_RETRY_AFTER)
+    }
+}
+
 /// A handle to the on-disk cache for a single video. Cheap to clone; all state is shared
 /// behind `Arc`s / a `watch` sender.
 #[derive(Clone)]
@@ -83,8 +109,11 @@ pub struct BlockCache {
     blocks: Arc<Mutex<HashSet<u64>>>,
     /// Blocks currently being downloaded, to deduplicate concurrent fills.
     in_flight: Arc<Mutex<HashSet<u64>>>,
-    /// Blocks that failed to download; keeps waiters from retrying in a loop.
-    failed: Arc<Mutex<HashMap<u64, String>>>,
+    /// Blocks whose download failed, with the error and when it happened; keeps waiters
+    /// from retrying in a loop. Entries expire after [`FAILED_RETRY_AFTER`] so a failure
+    /// that is only transient (an expired Telegram file reference, a dropped connection,
+    /// a rate limit) can heal instead of poisoning the block for the whole session.
+    failed: Arc<Mutex<HashMap<u64, Failure>>>,
     /// Monotonic version bumped on every state change (block stored or failed). Waiters
     /// subscribe and await `changed()`; the current value always reflects the latest
     /// state, so no completion can be missed.
@@ -153,6 +182,24 @@ impl BlockCache {
 
     fn manifest_path(&self) -> PathBuf {
         PathBuf::from(format!("{}.meta", self.path.display()))
+    }
+
+    /// The recorded error for `block` while it is still inside the retry cooldown,
+    /// dropping the record once it has expired so the block is downloadable again.
+    /// `None` means "not recently failed" — the caller should attempt the download.
+    fn fresh_failure(&self, block: u64) -> Option<String> {
+        let mut failed = self.failed.lock().unwrap();
+        match failed.get(&block) {
+            Some(failure) if failure.is_fresh() => Some(failure.error.clone()),
+            Some(_) => {
+                failed.remove(&block);
+                tracing::debug!(
+                    "cache: block {block} failure expired after {FAILED_RETRY_AFTER:?}; retrying"
+                );
+                None
+            }
+            None => None,
+        }
     }
 
     /// Restore block coverage from the sidecar manifest, if any. Any mismatch (bad
@@ -224,6 +271,11 @@ impl BlockCache {
     /// owner to finish, and then read the block from disk. A download failure is recorded
     /// so every waiter receives the error.
     ///
+    /// A recorded failure only short-circuits for [`FAILED_RETRY_AFTER`]; after that the
+    /// block is downloaded again, so a failure whose cause has since gone away (a
+    /// refreshed Telegram document, a reconnected sender) recovers instead of leaving the
+    /// rest of the file permanently unreachable.
+    ///
     /// `download` is lazy (an async block) and only polled by the request that owns the
     /// in-flight claim.
     pub async fn ensure<F>(&self, block: u64, download: F) -> Result<(), anyhow::Error>
@@ -231,11 +283,11 @@ impl BlockCache {
         F: std::future::Future<Output = Result<Vec<u8>, anyhow::Error>>,
     {
         loop {
-            // Fast paths: block already present, or it previously failed.
+            // Fast paths: block already present, or it failed recently.
             if self.blocks.lock().unwrap().contains(&block) {
                 return Ok(());
             }
-            if let Some(msg) = self.failed.lock().unwrap().get(&block).cloned() {
+            if let Some(msg) = self.fresh_failure(block) {
                 return Err(anyhow::anyhow!("block {block} previously failed: {msg}"));
             }
 
@@ -256,7 +308,7 @@ impl BlockCache {
                 // we cannot miss the owner's completion.
                 let mut rx = self.version.subscribe();
                 if self.blocks.lock().unwrap().contains(&block)
-                    || self.failed.lock().unwrap().contains_key(&block)
+                    || self.fresh_failure(block).is_some()
                 {
                     continue; // changed while subscribing; re-evaluate
                 }
@@ -270,7 +322,7 @@ impl BlockCache {
                 self.in_flight.lock().unwrap().remove(&block);
                 return Ok(());
             }
-            if let Some(msg) = self.failed.lock().unwrap().get(&block).cloned() {
+            if let Some(msg) = self.fresh_failure(block) {
                 self.in_flight.lock().unwrap().remove(&block);
                 return Err(anyhow::anyhow!("block {block} previously failed: {msg}"));
             }
@@ -293,7 +345,14 @@ impl BlockCache {
                     self.save_manifest();
                 }
                 Err(e) => {
-                    self.failed.lock().unwrap().insert(block, e.to_string());
+                    tracing::warn!("cache: block {block} download failed: {e:#}");
+                    self.failed.lock().unwrap().insert(
+                        block,
+                        Failure {
+                            error: e.to_string(),
+                            at: SystemTime::now(),
+                        },
+                    );
                 }
             }
             self.in_flight.lock().unwrap().remove(&block);
@@ -634,6 +693,40 @@ mod tests {
             .await;
         assert!(err2.is_err());
         assert!(err2.unwrap_err().to_string().contains("boom"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A recorded failure must not be permanent: once the cooldown expires the block is
+    /// downloadable again. This is what unsticks a video whose blocks were all marked
+    /// failed by a single cause (e.g. an expired Telegram file reference) — without it
+    /// the rest of the file stays unreachable for the whole session.
+    #[tokio::test]
+    async fn failed_block_is_retried_after_the_cooldown() {
+        let dir = temp_cache_dir();
+        let cache = BlockCache::new(&dir, 1, 3, 4 * BLOCK_SIZE);
+        assert!(
+            cache
+                .ensure(3, async { Err(anyhow::anyhow!("boom")) })
+                .await
+                .is_err()
+        );
+
+        // Still inside the cooldown: the download closure must not run again.
+        assert!(
+            cache
+                .ensure(3, async { panic!("must not retry inside the cooldown") })
+                .await
+                .is_err()
+        );
+
+        // Age the record past the cooldown; the next request must fetch the block.
+        cache.failed.lock().unwrap().get_mut(&3).unwrap().at =
+            SystemTime::now() - FAILED_RETRY_AFTER - Duration::from_secs(1);
+        cache
+            .ensure(3, async { Ok(vec![5u8; BLOCK_SIZE as usize]) })
+            .await
+            .unwrap();
+        assert!(cache.read_block(3).await.unwrap().is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

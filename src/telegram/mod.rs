@@ -143,6 +143,11 @@ async fn run_telegram(
     let mut messages_iter: Option<client::MessageIter> = None;
     // Shared with the realtime listener: `0` means "none"/"unknown" (see `UNSET`).
     let selected_chat_id = Arc::new(AtomicI64::new(0));
+    // The selected chat's `PeerRef`, shared with the realtime listener so it can attach
+    // the access hash to videos registered from live messages. `None` until a chat is
+    // opened; cleared on chat switch/sign-out.
+    let selected_peer: Arc<tokio::sync::Mutex<Option<client::PeerRef>>> =
+        Arc::new(tokio::sync::Mutex::new(None));
     // Own account id, for marking own messages (0 until known).
     let self_user_id = Arc::new(AtomicI64::new(0));
 
@@ -170,9 +175,10 @@ async fn run_telegram(
     let proxy_state = ProxyState {
         reqwest_client: reqwest::Client::new(),
         video_registry: video_registry.clone(),
-        video_source: Arc::new(client::GrammersVideoSource {
-            client: client.clone_inner(),
-        }),
+        video_source: Arc::new(client::GrammersVideoSource::new(
+            client.clone_inner(),
+            video_registry.clone(),
+        )),
         cache_dir: cache_dir.clone(),
         video_cache: video_cache.clone(),
     };
@@ -264,7 +270,7 @@ async fn run_telegram(
         client.clone(),
         updates,
         self_user_id.clone(),
-        selected_chat_id.clone(),
+        selected_peer.clone(),
         video_registry.clone(),
         ui_tx.clone(),
     );
@@ -433,6 +439,7 @@ async fn run_telegram(
             BgCommand::SelectChat(peer_ref) => {
                 let chat_id = peer_ref.id.bot_api_dialog_id().unwrap_or(0);
                 selected_chat_id.store(chat_id, Ordering::Relaxed);
+                *selected_peer.lock().await = Some(peer_ref);
                 video_registry.lock().await.clear();
                 video_cache.lock().await.clear();
 
@@ -442,6 +449,7 @@ async fn run_telegram(
                     client::MESSAGE_PAGE_SIZE,
                     chat_id,
                     nonzero(self_user_id.load(Ordering::Relaxed)),
+                    peer_ref,
                 )
                 .await
                 {
@@ -466,15 +474,17 @@ async fn run_telegram(
             }
             BgCommand::LoadMoreMessages => {
                 let chat_id = selected_chat_id.load(Ordering::Relaxed);
+                let peer = *selected_peer.lock().await;
                 if chat_id == 0 {
                     continue;
                 }
-                if let Some(iter) = messages_iter.as_mut() {
+                if let (Some(iter), Some(peer)) = (messages_iter.as_mut(), peer) {
                     match client::next_messages_page(
                         iter,
                         client::MESSAGE_PAGE_SIZE,
                         chat_id,
                         nonzero(self_user_id.load(Ordering::Relaxed)),
+                        peer,
                     )
                     .await
                     {
@@ -500,6 +510,7 @@ async fn run_telegram(
             BgCommand::BackToChatList => {
                 messages_iter = None;
                 selected_chat_id.store(0, Ordering::Relaxed);
+                *selected_peer.lock().await = None;
                 video_registry.lock().await.clear();
                 video_cache.lock().await.clear();
             }
@@ -538,7 +549,7 @@ async fn run_telegram(
             BgCommand::PlayTelegramVideo { peer, msg_id } => {
                 // The registry may have been cleared since the video was last played, so
                 // refetch the message and re-register its document before streaming.
-                match client::fetch_video_info(&client, peer, msg_id).await {
+                match client::fetch_video_info(client.inner(), peer, msg_id).await {
                     Ok(video) => {
                         video_registry.lock().await.insert(msg_id, video.clone());
                         let url = format!("http://127.0.0.1:{}/telegram/{}", proxy_port, msg_id);
@@ -567,6 +578,7 @@ async fn run_telegram(
                 dialogs_iter = None;
                 messages_iter = None;
                 selected_chat_id.store(0, Ordering::Relaxed);
+                *selected_peer.lock().await = None;
                 video_registry.lock().await.clear();
                 video_cache.lock().await.clear();
                 login_token = None;

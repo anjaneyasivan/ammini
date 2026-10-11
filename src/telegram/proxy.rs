@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::telegram::cache::{self, BlockCache};
-use crate::telegram::client::{Document, VideoDownloadInfo, VideoSource};
+use crate::telegram::client::{VideoDownloadInfo, VideoSource};
 
 /// Block size used by the disk cache and the Telegram download iterator. A requested
 /// range may start and end mid-block; the streaming code trims the excess bytes.
@@ -245,7 +245,7 @@ async fn handle_telegram(
             .clone()
     };
 
-    let stream = telegram_cache_stream(source, cache, video.document.clone(), start, end);
+    let stream = telegram_cache_stream(source, cache, video, start, end);
     build_telegram_response(
         status,
         content_range,
@@ -321,13 +321,14 @@ fn parse_range(headers: &HeaderMap, total_size: u64) -> Option<(u64, u64)> {
 fn telegram_cache_stream(
     source: Arc<dyn VideoSource>,
     cache: BlockCache,
-    document: Document,
+    video: VideoDownloadInfo,
     start: u64,
     end: u64,
 ) -> ReceiverStream<Result<Bytes, anyhow::Error>> {
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, anyhow::Error>>(8);
     tokio::spawn(async move {
         let total_size = cache.total_size();
+        let msg_id = video.msg_id;
         let blocks = cache::blocks_between(start, end);
         let first_block = *blocks.start();
         let last_block = *blocks.end();
@@ -354,10 +355,13 @@ fn telegram_cache_stream(
             while prefetched_up_to < window_end {
                 prefetched_up_to += 1;
                 let next = prefetched_up_to;
-                let (cache, source, doc) = (cache.clone(), source.clone(), document.clone());
+                let (cache, source, video) = (cache.clone(), source.clone(), video.clone());
                 tokio::spawn(async move {
                     let _ = cache
-                        .ensure(next, async move { source.download_block(&doc, next).await })
+                        .ensure(
+                            next,
+                            async move { source.download_block(&video, next).await },
+                        )
                         .await;
                 });
             }
@@ -376,14 +380,15 @@ fn telegram_cache_stream(
                 // Block is not on disk yet. Ensure it is downloaded (or wait for the
                 // in-flight owner) and then retry the read.
                 let source = source.clone();
-                let doc = document.clone();
+                let video = video.clone();
                 if let Err(e) = cache
                     .ensure(
                         block,
-                        async move { source.download_block(&doc, block).await },
+                        async move { source.download_block(&video, block).await },
                     )
                     .await
                 {
+                    tracing::warn!("proxy: msg_id={msg_id} block {block} unavailable: {e:#}");
                     break Err(e);
                 }
             };

@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use ammini::telegram::cache::BLOCK_SIZE;
-use ammini::telegram::client::{Document, VideoDownloadInfo, VideoSource};
+use ammini::telegram::client::{Document, PeerRef, VideoDownloadInfo, VideoSource};
 use ammini::telegram::proxy::{ProxyState, start_server};
 use tokio::sync::Mutex;
 
@@ -32,7 +32,7 @@ struct FakeSource {
 impl VideoSource for FakeSource {
     fn download_block<'a>(
         &'a self,
-        _document: &'a Document,
+        _video: &'a VideoDownloadInfo,
         block: u64,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<Vec<u8>, anyhow::Error>> + Send + 'a>,
@@ -66,6 +66,14 @@ fn dummy_document() -> Document {
     })
 }
 
+/// A dummy peer for registry entries; the fake source never contacts Telegram.
+fn dummy_peer() -> PeerRef {
+    PeerRef {
+        id: grammers_session::types::PeerId::user(1).unwrap(),
+        auth: grammers_session::types::PeerAuth::default(),
+    }
+}
+
 /// Start a proxy server with one registered video (msg_id 1) of `total_size` bytes.
 /// Returns (port, cache dir) so tests can clean up.
 async fn start_test_server(total_size: u64, source: FakeSource) -> (u16, PathBuf) {
@@ -81,6 +89,7 @@ async fn start_test_server(total_size: u64, source: FakeSource) -> (u16, PathBuf
         VideoDownloadInfo {
             msg_id: 1,
             chat_id: 1,
+            peer: dummy_peer(),
             document: dummy_document(),
             size: total_size as usize,
         },

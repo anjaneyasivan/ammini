@@ -171,6 +171,7 @@ impl AmminiApp {
             show_playlist: false,
             persistent,
             status: String::from("Drop a video or press Ctrl/Cmd+O to open"),
+            current_media: None,
             resume_pending: None,
             last_resume_write: None,
         };
@@ -791,6 +792,22 @@ impl AmminiApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add(egui::Label::new(&self.fsm.status).truncate());
+                // `status` is a bare state word ("Loading" / "Playing" / "Paused"), so the
+                // path — a local file or the localhost proxy URL for remote media — is
+                // shown beside it and stays put while playback runs. The full value is
+                // in the hover text for elided entries.
+                if let Some(media) = self.fsm.current_media.clone() {
+                    ui.separator();
+                    let dark = ammini::style::is_dark(ui.ctx());
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(elide_tail(&media, 44))
+                                .color(ammini::style::text_secondary(dark)),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(&media);
+                }
             });
         });
     }
@@ -1016,14 +1033,21 @@ impl App for AmminiApp {
 }
 
 fn truncate_path(path: &str) -> String {
-    let chars: Vec<char> = path.chars().collect();
-    if chars.len() > 60 {
+    elide_tail(path, 60)
+}
+
+/// Shorten `text` to at most `max` chars, keeping the tail behind a `...` marker.
+/// The tail carries the identifying part of a path or URL (the file name, the
+/// `/telegram/{msg_id}` route), so it is what survives elision.
+fn elide_tail(text: &str, max: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() > max {
         format!(
             "...{}",
-            chars[chars.len() - 57..].iter().collect::<String>()
+            chars[chars.len() - (max - 3)..].iter().collect::<String>()
         )
     } else {
-        path.to_string()
+        text.to_string()
     }
 }
 

@@ -60,6 +60,10 @@ pub struct PlayerFsm {
     pub show_playlist: bool,
     pub persistent: PersistentState,
     pub status: String,
+    /// Path or proxy URL of the media handed to mpv by the last successful
+    /// `load_media` call. `status` only names it while loading, so the top bar shows
+    /// this separately to keep the URL on screen while playing.
+    pub current_media: Option<String>,
     /// Resume position to seek to as soon as the current media finishes loading.
     pub resume_pending: Option<f64>,
     /// Last time `persistent.resume` was written, to throttle the per-frame polls.
@@ -243,7 +247,10 @@ fn load_media(fsm: &mut PlayerFsm, path: String) -> Outcome<FsmState> {
                 source: playback_source(&path),
                 file_name: file_name_of(&path),
             });
-            fsm.status = format!("Loading: {path}");
+            // The path is shown separately from the status line (see `current_media`),
+            // so the status stays a plain state word.
+            fsm.status = "Loading".into();
+            fsm.current_media = Some(path.clone());
             Transition(FsmState::loading())
         }
         Err(e) => {
@@ -254,6 +261,8 @@ fn load_media(fsm: &mut PlayerFsm, path: String) -> Outcome<FsmState> {
                 error: e.to_string(),
             });
             fsm.status = format!("Error loading {path}: {e}");
+            // Nothing is playing, and the error line already names the path.
+            fsm.current_media = None;
             Transition(FsmState::error())
         }
     }

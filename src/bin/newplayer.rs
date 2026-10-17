@@ -694,7 +694,6 @@ impl App for NewPlayerApp {
                         "settings" => "SETTINGS",
                         _ => "PANEL",
                     };
-                    ui.label(egui::RichText::new(title).monospace().size(11.0).strong().color(C_DIM));
                     ui.add_space(4.0);
                     match self.active_tab {
                         "telegram" => {
@@ -772,7 +771,7 @@ impl App for NewPlayerApp {
         // Floating inspector overlay
         if self.inspector_open {
             let screen = ctx.viewport_rect();
-            let insp_resp = egui::Area::new("inspector_overlay".into()).fixed_pos(egui::pos2(screen.width() - 296.0, 36.0)).show(&ctx, |ui| {
+            let insp_resp = egui::Area::new("inspector_overlay".into()).fixed_pos(egui::pos2(screen.width() - 296.0, 38.0)).show(&ctx, |ui| {
                 egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(0.0).inner_margin(egui::Margin { left: 12, right: 12, top: 0, bottom: 10 }).show(ui, |ui| {
                     ui.set_width(280.0);
                     ui.set_min_height(ctx.viewport_rect().height() - 44.0);

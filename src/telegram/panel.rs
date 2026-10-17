@@ -721,7 +721,7 @@ impl TelegramPanel {
     ) -> bool {
         let is_me = msg.sender_is_self;
         let (fill, text_color) = if is_me {
-            (C_ACCENT, Color32::WHITE)
+            (Color32::TRANSPARENT, Color32::WHITE)
         } else {
             (C_RAISED, C_TEXT)
         };
@@ -738,7 +738,7 @@ impl TelegramPanel {
             let max_width = ui.available_width() * BUBBLE_MAX_WIDTH;
             egui::Frame::new()
                 .fill(fill)
-                .stroke(egui::Stroke::new(1.0, C_BORDER2))
+                .stroke(egui::Stroke::new(1.0, if is_me { C_ACCENT } else { C_BORDER2 }))
                 .corner_radius(CornerRadius::same(12))
                 .inner_margin(Margin::symmetric(12, 8))
                 .show(ui, |ui| {
@@ -836,7 +836,7 @@ impl TelegramPanel {
 
             if status != VideoStatus::Loading {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if Self::play_pill(ui, is_me, compact) {
+                    if Self::play_pill(ui, false, compact) {
                         play_clicked = true;
                     }
                 });

@@ -18,10 +18,8 @@ use eframe::egui::{
     self, Align, Align2, Color32, CornerRadius, FontId, Key, Layout, Margin, RichText, Sense,
     UiBuilder,
 };
-use egui_material_icons::{MaterialIcon, icons::*};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::fonts::{icon_label, icon_label_colored, icon_only};
 use crate::style;
 
 // Redesign palette (mirrors docs/ui-redesign-reference.md)
@@ -170,7 +168,14 @@ impl TelegramPanel {
         };
 
         ui.add_space(12.0);
-        if Self::primary_button(ui, ICON_SEND, "Send code", !phone.is_empty()).clicked() {
+        if Self::primary_button(
+            ui,
+            include_bytes!("../../assets/icons/newplayer/kl-send-fill.svg"),
+            "Send code",
+            !phone.is_empty(),
+        )
+        .clicked()
+        {
             submit = true;
         }
         if submit && !phone.is_empty() {
@@ -214,7 +219,14 @@ impl TelegramPanel {
         };
 
         ui.add_space(12.0);
-        if Self::primary_button(ui, ICON_CHECK, "Verify", !code.is_empty()).clicked() {
+        if Self::primary_button(
+            ui,
+            include_bytes!("../../assets/icons/newplayer/kl-check-fill.svg"),
+            "Verify",
+            !code.is_empty(),
+        )
+        .clicked()
+        {
             submit = true;
         }
         if submit && !code.is_empty() {
@@ -223,7 +235,13 @@ impl TelegramPanel {
         }
 
         ui.add_space(6.0);
-        if Self::ghost_button(ui, ICON_ARROW_BACK, "Change phone number").clicked() {
+        if Self::ghost_button(
+            ui,
+            include_bytes!("../../assets/icons/newplayer/kl-arrow-left-fill.svg"),
+            "Change phone number",
+        )
+        .clicked()
+        {
             Self::data_mut(fsm).code.clear();
             fsm.handle(&TelegramEvent::NeedsAuth);
         }
@@ -278,7 +296,14 @@ impl TelegramPanel {
         };
 
         ui.add_space(12.0);
-        if Self::primary_button(ui, ICON_LOGIN, "Sign in", !password.is_empty()).clicked() {
+        if Self::primary_button(
+            ui,
+            include_bytes!("../../assets/icons/newplayer/kl-log-in-fill.svg"),
+            "Sign in",
+            !password.is_empty(),
+        )
+        .clicked()
+        {
             submit = true;
         }
         if submit && !password.is_empty() {
@@ -287,7 +312,13 @@ impl TelegramPanel {
         }
 
         ui.add_space(6.0);
-        if Self::ghost_button(ui, ICON_ARROW_BACK, "Change phone number").clicked() {
+        if Self::ghost_button(
+            ui,
+            include_bytes!("../../assets/icons/newplayer/kl-arrow-left-fill.svg"),
+            "Change phone number",
+        )
+        .clicked()
+        {
             Self::data_mut(fsm).password.clear();
             fsm.handle(&TelegramEvent::NeedsAuth);
         }
@@ -307,7 +338,14 @@ impl TelegramPanel {
         Self::error_banner(ui, dark, &message);
         ui.add_space(14.0);
 
-        if Self::primary_button(ui, ICON_REFRESH, "Try again", true).clicked() {
+        if Self::primary_button(
+            ui,
+            include_bytes!("../../assets/icons/newplayer/kl-refresh-cw-fill.svg"),
+            "Try again",
+            true,
+        )
+        .clicked()
+        {
             fsm.handle(&TelegramEvent::ResetAuth);
         }
     }
@@ -525,7 +563,16 @@ impl TelegramPanel {
         ui.horizontal(|ui| {
             ui.add_space(2.0);
             if ui
-                .add(egui::Button::new(icon_only(ui, ICON_ARROW_BACK)).frame(false))
+                .add(
+                    egui::Button::image(
+                        egui::Image::from_bytes(
+                            "back.svg",
+                            include_bytes!("../../assets/icons/newplayer/kl-arrow-left-fill.svg"),
+                        )
+                        .fit_to_exact_size(egui::vec2(16.0, 16.0)),
+                    )
+                    .frame(false),
+                )
                 .on_hover_text("Back to chats")
                 .clicked()
             {
@@ -934,13 +981,15 @@ impl TelegramPanel {
                 )
             }
         };
-        let (text, min_size) = if compact {
-            (icon_only(ui, ICON_PLAY_ARROW), egui::vec2(30.0, 26.0))
+        let play_icon = egui::Image::from_bytes(
+            "play.svg",
+            include_bytes!("../../assets/icons/newplayer/kl-play-fill.svg"),
+        )
+        .fit_to_exact_size(egui::vec2(16.0, 16.0));
+        let min_size = if compact {
+            egui::vec2(30.0, 26.0)
         } else {
-            (
-                icon_label_colored(ui, ICON_PLAY_ARROW, "Play", Color32::WHITE),
-                egui::vec2(58.0, 26.0),
-            )
+            egui::vec2(58.0, 26.0)
         };
 
         ui.scope(|ui| {
@@ -953,11 +1002,22 @@ impl TelegramPanel {
                 widget.weak_bg_fill = fill;
                 widget.fg_stroke.color = Color32::WHITE;
             }
-            ui.add(
-                egui::Button::new(text)
+            if compact {
+                ui.add(
+                    egui::Button::image(play_icon)
+                        .corner_radius(CornerRadius::same(6))
+                        .min_size(min_size),
+                )
+            } else {
+                ui.add(
+                    egui::Button::image_and_text(
+                        play_icon,
+                        egui::RichText::new("Play").color(Color32::WHITE),
+                    )
                     .corner_radius(CornerRadius::same(6))
                     .min_size(min_size),
-            )
+                )
+            }
         })
         .inner
         .on_hover_text("Play video")
@@ -989,7 +1049,7 @@ impl TelegramPanel {
     /// Filled accent button (white text) for a screen's primary action.
     fn primary_button(
         ui: &mut egui::Ui,
-        icon: MaterialIcon,
+        icon: &'static [u8],
         label: &str,
         enabled: bool,
     ) -> egui::Response {
@@ -999,9 +1059,11 @@ impl TelegramPanel {
             C_ACCENT.gamma_multiply(0.35)
         };
         let width = ui.available_width();
+        let image =
+            egui::Image::from_bytes("icon.svg", icon).fit_to_exact_size(egui::vec2(16.0, 16.0));
         ui.add_enabled(
             enabled,
-            egui::Button::new(icon_label_colored(ui, icon, label, Color32::WHITE))
+            egui::Button::image_and_text(image, egui::RichText::new(label).color(Color32::WHITE))
                 .fill(fill)
                 .corner_radius(CornerRadius::same(6))
                 .min_size(egui::vec2(width, 34.0)),
@@ -1009,15 +1071,22 @@ impl TelegramPanel {
     }
 
     /// Borderless, secondary-styled button for low-emphasis actions.
-    fn ghost_button(ui: &mut egui::Ui, icon: MaterialIcon, label: &str) -> egui::Response {
-        ui.add(egui::Button::new(icon_label(ui, icon, label)).frame(false))
+    fn ghost_button(ui: &mut egui::Ui, icon: &'static [u8], label: &str) -> egui::Response {
+        let image =
+            egui::Image::from_bytes("icon.svg", icon).fit_to_exact_size(egui::vec2(16.0, 16.0));
+        ui.add(egui::Button::image_and_text(image, label).frame(false))
     }
 
     /// Full-width borderless button used to page in more items.
     fn load_more_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
         let width = ui.available_width();
+        let image = egui::Image::from_bytes(
+            "expand.svg",
+            include_bytes!("../../assets/icons/newplayer/kl-chevron-down-fill.svg"),
+        )
+        .fit_to_exact_size(egui::vec2(16.0, 16.0));
         ui.add(
-            egui::Button::new(icon_label(ui, ICON_EXPAND_MORE, label))
+            egui::Button::image_and_text(image, label)
                 .frame(false)
                 .min_size(egui::vec2(width, 30.0)),
         )

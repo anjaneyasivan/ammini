@@ -203,7 +203,7 @@ impl AmminiApp {
 
     pub fn render_inspector_overlay(
         &mut self,
-        ui: &mut egui::Ui,
+        _ui: &mut egui::Ui,
         ctx: &egui::Context,
         video_rect: egui::Rect,
     ) {

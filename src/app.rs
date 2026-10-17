@@ -1,24 +1,19 @@
-use ammini::fsm::{
-    FsmState, PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, record_recent_telegram,
-    track_label,
-};
+use ammini::fsm::{FsmState, PersistentState, PlayerEvent, PlayerFsm, track_label};
 use ammini::telegram::config::TelegramConfig;
 use ammini::telegram::panel::TelegramPanel;
-use ammini::telegram::state_machine::{TelegramEvent, TelegramFsm};
+use ammini::telegram::state_machine::TelegramFsm;
 use ammini::telegram::{BgCommand, UiMessage, start};
 use ammini::telemetry::{Metric, SeekTracker, TelemetryEvent};
 use ammini::update::UpdateAvailable;
-use eframe::{App, Frame, NativeOptions, egui};
+use eframe::egui;
 // iconify images are loaded via egui_extras image loaders (installed in App::new)
-use egui_sharkplayer::{PlayerState, SharkPlayer};
+use egui_sharkplayer::PlayerState;
 use rfd::FileDialog;
 use statig::blocking::StateMachine;
-use statig::prelude::*;
+
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tracing::{debug, info, trace};
 
 use crate::iconify::IconCache;
 use crate::theme::*;

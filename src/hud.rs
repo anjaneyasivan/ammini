@@ -36,9 +36,9 @@ impl AmminiApp {
 
     pub fn render_hud(
         &mut self,
-        ui: &mut egui::Ui,
+        _ui: &mut egui::Ui,
         ctx: &egui::Context,
-        video_rect: egui::Rect,
+        _video_rect: egui::Rect,
         cache_spans: &[(f64, f64)],
         hud_alpha: f32,
         show_hud: bool,

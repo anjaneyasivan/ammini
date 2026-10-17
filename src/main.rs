@@ -9,7 +9,6 @@ mod top_bar;
 mod types;
 mod ui;
 
-use crate::theme::*;
 use app::AmminiApp;
 
 // Re-exported for convenience.

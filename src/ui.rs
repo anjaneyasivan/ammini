@@ -1,26 +1,14 @@
-use ammini::fsm::{
-    FsmState, PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, record_recent_telegram,
-    track_label,
-};
-use ammini::telegram::config::TelegramConfig;
-use ammini::telegram::panel::TelegramPanel;
-use ammini::telegram::state_machine::{TelegramEvent, TelegramFsm};
-use ammini::telegram::{BgCommand, UiMessage, start};
-use ammini::telemetry::{Metric, SeekTracker, TelemetryEvent};
-use ammini::update::UpdateAvailable;
-use eframe::{App, Frame, NativeOptions, egui};
-use egui_sharkplayer::{PlayerState, SharkPlayer};
-use rfd::FileDialog;
-use statig::blocking::StateMachine;
-use statig::prelude::*;
-use std::collections::HashMap;
+use ammini::fsm::{PlayerEvent, RecentTelegram, record_recent_telegram};
+use ammini::telegram::UiMessage;
+use ammini::telegram::state_machine::TelegramEvent;
+use ammini::telemetry::SeekTracker;
+use eframe::{App, Frame, egui};
+use egui_sharkplayer::SharkPlayer;
+
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, info, trace};
 
 use crate::app::AmminiApp;
-use crate::theme::*;
 use crate::types::*;
 
 impl App for AmminiApp {

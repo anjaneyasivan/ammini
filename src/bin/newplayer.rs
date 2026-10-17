@@ -193,7 +193,6 @@ struct NewPlayerApp {
     subs_menu_open: bool,
     frame_count: u64,
     menu_opened_frame: u64,
-    pending_open_file: Option<String>,
 }
 
 impl NewPlayerApp {
@@ -273,7 +272,6 @@ impl NewPlayerApp {
             subs_menu_open: false,
             frame_count: 0,
             menu_opened_frame: 0,
-            pending_open_file: None,
         };
         app.fsm.init();
         Ok(app)
@@ -462,9 +460,6 @@ impl App for NewPlayerApp {
         self.handle_dropped_files(&ctx, &mut events);
         self.handle_shortcuts(&ctx, &mut events);
         self.handle_url_dialog(ui, &mut events);
-        if let Some(p) = self.pending_open_file.take() {
-            events.push(PlayerEvent::OpenFile(p));
-        }
         self.refresh_tracks();
 
         events.push(PlayerEvent::Poll);
@@ -688,40 +683,6 @@ impl App for NewPlayerApp {
                     ui.set_max_height(ctx.viewport_rect().height() - 44.0);
                     ui.label(egui::RichText::new("TELEGRAM").monospace().size(11.0).strong().color(C_DIM));
                     self.telegram_panel.ui(ui, &mut self.telegram_fsm, &self.bg_tx);
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.label(egui::RichText::new("RECENT FILES").monospace().size(11.0).strong().color(C_DIM));
-                    ui.add_space(4.0);
-                    let recent_files = self.fsm.persistent.recent_files.clone();
-                    if recent_files.is_empty() {
-                        ui.label(egui::RichText::new("No recent files").color(C_MUTED));
-                    } else {
-                        egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                            for path in &recent_files {
-                                if ui.button(path.rsplit('/').next().unwrap_or(path)).clicked() {
-                                    self.pending_open_file = Some(path.clone());
-                                }
-                            }
-                        });
-                    }
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("RECENT TELEGRAM").monospace().size(11.0).strong().color(C_DIM));
-                    ui.add_space(4.0);
-                    let recent_tg = self.fsm.persistent.recent_telegram.clone();
-                    if recent_tg.is_empty() {
-                        ui.label(egui::RichText::new("No recent Telegram files").color(C_MUTED));
-                    } else {
-                        egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                            for entry in &recent_tg {
-                                let label = format!("{} · {}", entry.chat_name, entry.name);
-                                if ui.button(&label).clicked() {
-                                    if let Some(bg) = &self.bg_tx {
-                                        let _ = bg.send(BgCommand::PlayTelegramVideo { peer: entry.peer, msg_id: entry.msg_id });
-                                    }
-                                }
-                            }
-                        });
-                    }
                 });
             });
             // dismiss on click outside

@@ -10,7 +10,7 @@ mod types;
 mod ui;
 
 use crate::theme::*;
-use app::NewPlayerApp;
+use app::AmminiApp;
 
 // Re-exported for convenience.
 pub use types::*;
@@ -40,7 +40,7 @@ fn main() -> eframe::Result<()> {
         "Ammini",
         options,
         Box::new(|cc| {
-            let app = NewPlayerApp::new(cc)?;
+            let app = AmminiApp::new(cc)?;
             Ok(Box::new(app))
         }),
     )

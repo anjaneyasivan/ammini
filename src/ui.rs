@@ -19,11 +19,11 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, info, trace};
 
-use crate::app::NewPlayerApp;
+use crate::app::AmminiApp;
 use crate::theme::*;
 use crate::types::*;
 
-impl App for NewPlayerApp {
+impl App for AmminiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
         self.frame_count += 1;
         let ctx = ui.ctx().clone();

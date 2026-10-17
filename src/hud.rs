@@ -1,8 +1,8 @@
-use crate::app::NewPlayerApp;
+use crate::app::AmminiApp;
 use crate::theme::*;
 use eframe::egui;
 
-impl NewPlayerApp {
+impl AmminiApp {
     pub fn paint_scrim(
         &self,
         ctx: &egui::Context,

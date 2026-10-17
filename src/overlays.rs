@@ -1,10 +1,10 @@
-use crate::app::NewPlayerApp;
+use crate::app::AmminiApp;
 use crate::right_sidebar;
 use crate::theme::*;
 use ammini::telegram::BgCommand;
 use eframe::egui;
 
-impl NewPlayerApp {
+impl AmminiApp {
     pub fn render_chats_overlay(
         &mut self,
         ui: &mut egui::Ui,

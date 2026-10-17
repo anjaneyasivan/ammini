@@ -27,7 +27,7 @@ use crate::types::{CacheCoverage, MediaTrack};
 pub const APP_KEY: &str = "min_mpv_state";
 const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
 
-pub struct NewPlayerApp {
+pub struct AmminiApp {
     // player
     pub fsm: StateMachine<PlayerFsm>,
     pub url_input: String,
@@ -69,7 +69,7 @@ pub struct NewPlayerApp {
     pub pending_open_file: Option<String>,
 }
 
-impl NewPlayerApp {
+impl AmminiApp {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {

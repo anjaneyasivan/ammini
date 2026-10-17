@@ -930,18 +930,33 @@ impl App for NewPlayerApp {
                                                                     } else {
                                                                         t.label.clone()
                                                                     };
-                                                                    if ui
-                                                                        .selectable_label(
-                                                                            t.selected, &label,
-                                                                        )
-                                                                        .clicked()
-                                                                    {
+                                                                    let (rect, resp) = ui.allocate_exact_size(
+                                                                        egui::vec2(ui.available_width(), 28.0),
+                                                                        egui::Sense::click(),
+                                                                    );
+                                                                    let fill = if t.selected {
+                                                                        C_RAISED2
+                                                                    } else if resp.hovered() {
+                                                                        C_ACCENT.linear_multiply(0.15)
+                                                                    } else {
+                                                                        egui::Color32::TRANSPARENT
+                                                                    };
+                                                                    ui.painter().rect_filled(rect, 4.0, fill);
+                                                                    ui.painter().text(
+                                                                        rect.left_center() + egui::vec2(8.0, 0.0),
+                                                                        egui::Align2::LEFT_CENTER,
+                                                                        &label,
+                                                                        egui::FontId::proportional(12.0),
+                                                                        if t.selected { C_TEXT } else { C_MUTED },
+                                                                    );
+                                                                    if resp.hovered() {
+                                                                        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                                                                    }
+                                                                    if resp.clicked() {
                                                                         if let Ok(()) = self
                                                                             .player_mut()
                                                                             .mpv()
-                                                                            .set_property(
-                                                                                "sid", t.id,
-                                                                            )
+                                                                            .set_property("sid", t.id)
                                                                         {
                                                                             for tr in &mut self
                                                                                 .subtitle_tracks
@@ -952,6 +967,7 @@ impl App for NewPlayerApp {
                                                                         }
                                                                         self.subs_menu_open = false;
                                                                     }
+                                                                    ui.add_space(2.0);
                                                                 }
                                                             });
                                                     });
@@ -1008,12 +1024,29 @@ impl App for NewPlayerApp {
                                                             } else {
                                                                 t.label.clone()
                                                             };
-                                                            if ui
-                                                                .selectable_label(
-                                                                    t.selected, &label,
-                                                                )
-                                                                .clicked()
-                                                            {
+                                                            let (rect, resp) = ui.allocate_exact_size(
+                                                                egui::vec2(ui.available_width(), 28.0),
+                                                                egui::Sense::click(),
+                                                            );
+                                                            let fill = if t.selected {
+                                                                C_RAISED2
+                                                            } else if resp.hovered() {
+                                                                C_ACCENT.linear_multiply(0.15)
+                                                            } else {
+                                                                egui::Color32::TRANSPARENT
+                                                            };
+                                                            ui.painter().rect_filled(rect, 4.0, fill);
+                                                            ui.painter().text(
+                                                                rect.left_center() + egui::vec2(8.0, 0.0),
+                                                                egui::Align2::LEFT_CENTER,
+                                                                &label,
+                                                                egui::FontId::proportional(12.0),
+                                                                if t.selected { C_TEXT } else { C_MUTED },
+                                                            );
+                                                            if resp.hovered() {
+                                                                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                                                            }
+                                                            if resp.clicked() {
                                                                 if let Ok(()) = self
                                                                     .player_mut()
                                                                     .mpv()
@@ -1026,6 +1059,7 @@ impl App for NewPlayerApp {
                                                                 }
                                                                 self.audio_menu_open = false;
                                                             }
+                                                            ui.add_space(2.0);
                                                         }
                                                     });
                                             });

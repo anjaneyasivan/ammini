@@ -100,6 +100,17 @@ impl NewPlayerApp {
         ammini::style::install(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
 
+        // STYLE.md: dark-only token theme and 4px-grid spacing.
+        let mut visuals = egui::Visuals::dark();
+        visuals.panel_fill = C_TOOLBAR;
+        visuals.window_fill = C_RAISED;
+        visuals.override_text_color = Some(C_TEXT);
+        cc.egui_ctx.set_visuals(visuals);
+        cc.egui_ctx.global_style_mut(|style| {
+            style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+            style.spacing.button_padding = egui::vec2(10.0, 6.0);
+        });
+
         let player = PlayerState::new(cc).map_err(|e| {
             Box::new(std::io::Error::other(format!("player init: {e}")))
                 as Box<dyn std::error::Error + Send + Sync>

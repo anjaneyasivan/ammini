@@ -30,7 +30,7 @@ const C_MUTED: egui::Color32 = egui::Color32::from_rgb(0xa1, 0xa1, 0xaa);
 const C_RAISED: egui::Color32 = egui::Color32::from_rgb(0x1f, 0x1f, 0x26);
 const C_RAISED2: egui::Color32 = egui::Color32::from_rgb(0x22, 0x22, 0x2b);
 const C_BORDER2: egui::Color32 = egui::Color32::from_rgb(0x26, 0x26, 0x2e);
-const C_ACCENT: egui::Color32 = egui::Color32::from_rgb(0x3f, 0xa9, 0xad);
+const C_ACCENT: egui::Color32 = egui::Color32::from_rgb(0x34, 0xc8, 0xb0);
 use crate::telegram::media_meta::{format_bytes, format_duration};
 use crate::telegram::state_machine::{TelegramData, TelegramEvent, TelegramFsm, TelegramState};
 use crate::telegram::{BgCommand, DialogInfo, MediaMeta, MessageInfo};

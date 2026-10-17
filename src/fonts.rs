@@ -9,11 +9,16 @@ use std::sync::Arc;
 use eframe::egui;
 use egui_material_icons::MaterialIcon;
 
-/// Inter (variable), the primary text face — a free San Francisco substitute, per the
-/// macOS style guide.
+/// Inter (variable), retained as a fallback sans face.
 ///
 /// Source: rsms/inter v4.1, SIL Open Font License 1.1 (see `assets/fonts/OFL-Inter.txt`).
 const INTER: &[u8] = include_bytes!("../assets/fonts/InterVariable.ttf");
+
+/// DM Sans, the UI text face per STYLE.md.
+///
+/// Source: googlefonts/dm-fonts, SIL Open Font License 1.1
+/// (see `assets/fonts/OFL-DMSans.txt`).
+const DM_SANS: &[u8] = include_bytes!("../assets/fonts/DMSans-Regular.ttf");
 
 /// Modern monochrome Noto Emoji (variable weight), covering emojis through Unicode 15+
 /// including ZWJ sequences, skin tones and flags.
@@ -166,6 +171,10 @@ pub fn font_definitions() -> egui::FontDefinitions {
         "Inter".to_owned(),
         Arc::new(egui::FontData::from_static(INTER)),
     );
+    defs.font_data.insert(
+        "DMSans".to_owned(),
+        Arc::new(egui::FontData::from_static(DM_SANS)),
+    );
 
     // DejaVu Sans sits right after the emoji font: it picks up symbols/arrows/dingbats
     // the emoji font doesn't cover, before egui's (outdated) builtins or script fallbacks.
@@ -198,12 +207,13 @@ pub fn font_definitions() -> egui::FontDefinitions {
         fallbacks.push((*name).to_owned());
     }
 
-    // Proportional: Inter stays the primary face, with our emoji/symbol/script fallbacks
-    // right after it, ahead of egui's builtin fonts.
+    // Proportional: DM Sans is the primary UI face per STYLE.md, with Inter and the
+    // emoji/symbol/script fallbacks after it.
     {
         let list = defs.families.get_mut(&egui::FontFamily::Proportional).unwrap();
-        list.insert(0, "Inter".to_owned());
-        list.splice(1..1, fallbacks.iter().cloned());
+        list.insert(0, "DMSans".to_owned());
+        list.insert(1, "Inter".to_owned());
+        list.splice(2..2, fallbacks.iter().cloned());
     }
     // Monospace: JetBrains Mono first, then Intel One Mono, then Inter + the same
     // emoji/symbol/script fallbacks so glyph coverage is identical to Proportional.

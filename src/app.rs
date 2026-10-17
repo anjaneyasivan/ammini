@@ -10,6 +10,7 @@ use eframe::egui;
 use egui_sharkplayer::PlayerState;
 use rfd::FileDialog;
 use statig::blocking::StateMachine;
+use statig::prelude::IntoStateMachineExt;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

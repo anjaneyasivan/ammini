@@ -1,4 +1,3 @@
-use ammini::fonts::icon_label;
 use ammini::fsm::{
     FsmState, PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, record_recent_telegram,
     track_label,
@@ -10,7 +9,7 @@ use ammini::telegram::{BgCommand, UiMessage, start};
 use ammini::telemetry::{Metric, SeekTracker, TelemetryEvent};
 use ammini::update::UpdateAvailable;
 use eframe::{App, Frame, NativeOptions, egui};
-use egui_material_icons::{MaterialIcon, icons::*};
+// iconify images are loaded via egui_extras image loaders (installed in App::new)
 use egui_sharkplayer::{PlayerState, SharkPlayer};
 use rfd::FileDialog;
 use statig::blocking::StateMachine;
@@ -32,50 +31,6 @@ use iconify::IconCache;
 
 const APP_KEY: &str = "min_mpv_state";
 const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
-
-// ---------------------------------------------------------------------------
-// Material icons for sharkplayer control bar
-// ---------------------------------------------------------------------------
-struct PlayerControlIcons;
-const PLAYER_ICON_SIZE: f32 = 20.0;
-fn player_icon(icon: MaterialIcon) -> egui::WidgetText {
-    icon.rich_text().size(PLAYER_ICON_SIZE).into()
-}
-impl egui_sharkplayer::ControlsIconProvider for PlayerControlIcons {
-    fn play(&self) -> egui::WidgetText {
-        player_icon(ICON_PLAY_ARROW)
-    }
-    fn pause(&self) -> egui::WidgetText {
-        player_icon(ICON_PAUSE)
-    }
-    fn skip_backward(&self) -> egui::WidgetText {
-        player_icon(ICON_SKIP_PREVIOUS)
-    }
-    fn skip_forward(&self) -> egui::WidgetText {
-        player_icon(ICON_SKIP_NEXT)
-    }
-    fn info(&self) -> egui::WidgetText {
-        player_icon(ICON_INFO)
-    }
-    fn muted_volume(&self) -> egui::WidgetText {
-        player_icon(ICON_VOLUME_OFF)
-    }
-    fn low_volume(&self) -> egui::WidgetText {
-        player_icon(ICON_VOLUME_MUTE)
-    }
-    fn medium_volume(&self) -> egui::WidgetText {
-        player_icon(ICON_VOLUME_DOWN)
-    }
-    fn high_volume(&self) -> egui::WidgetText {
-        player_icon(ICON_VOLUME_UP)
-    }
-    fn fullscreen(&self) -> egui::WidgetText {
-        player_icon(ICON_FULLSCREEN)
-    }
-    fn fullscreen_exit(&self) -> egui::WidgetText {
-        player_icon(ICON_FULLSCREEN_EXIT)
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Media track
@@ -576,7 +531,7 @@ impl App for NewPlayerApp {
             let cache_color = ammini::style::cache_bar_fill(ui.visuals().widgets.inactive.bg_fill);
             let pending = self.pending_seek.clone();
             let r = ui.add(
-                SharkPlayer::new_with_icons(self.player_mut(), PlayerControlIcons)
+                SharkPlayer::new(self.player_mut())
                     .show_hud(false)
                     .seek_callback(Rc::new(move |_forward, target| {
                         *pending.lock().unwrap() = Some(SeekTracker::new(target, _forward));
@@ -667,15 +622,16 @@ impl App for NewPlayerApp {
                         ui.horizontal(|ui| {
                             ui.add_space(8.0);
                             let playing = !is_paused;
+                            let play_icon_url = if playing {
+                                "https://api.iconify.design/material-symbols/pause.svg?color=%23ffffff&height=16"
+                            } else {
+                                "https://api.iconify.design/material-symbols/play-arrow.svg?color=%23ffffff&height=16"
+                            };
                             if ui
                                 .add(
-                                    egui::Button::new(if playing {
-                                        ICON_PAUSE.rich_text().size(16.0)
-                                    } else {
-                                        ICON_PLAY_ARROW.rich_text().size(16.0)
-                                    })
-                                    .fill(C_RAISED)
-                                    .min_size(egui::vec2(32.0, 28.0)),
+                                    egui::Button::image(egui::Image::new(play_icon_url).fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                        .fill(C_RAISED)
+                                        .min_size(egui::vec2(32.0, 28.0)),
                                 )
                                 .clicked()
                             {
@@ -683,7 +639,7 @@ impl App for NewPlayerApp {
                             }
                             if ui
                                 .add(
-                                    egui::Button::new("⏮")
+                                    egui::Button::image(egui::Image::new("https://api.iconify.design/material-symbols/replay-10.svg?color=%23ffffff&height=16").fit_to_exact_size(egui::vec2(16.0, 16.0)))
                                         .fill(C_RAISED)
                                         .min_size(egui::vec2(28.0, 28.0)),
                                 )
@@ -693,7 +649,7 @@ impl App for NewPlayerApp {
                             }
                             if ui
                                 .add(
-                                    egui::Button::new("⏭")
+                                    egui::Button::image(egui::Image::new("https://api.iconify.design/material-symbols/forward-10.svg?color=%23ffffff&height=16").fit_to_exact_size(egui::vec2(16.0, 16.0)))
                                         .fill(C_RAISED)
                                         .min_size(egui::vec2(28.0, 28.0)),
                                 )
@@ -730,15 +686,16 @@ impl App for NewPlayerApp {
                                 |ui| {
                                     let is_fullscreen =
                                         ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+                                    let fs_icon_url = if is_fullscreen {
+                                        "https://api.iconify.design/material-symbols/fullscreen-exit.svg?color=%23ffffff&height=16"
+                                    } else {
+                                        "https://api.iconify.design/material-symbols/fullscreen.svg?color=%23ffffff&height=16"
+                                    };
                                     if ui
                                         .add(
-                                            egui::Button::new(if is_fullscreen {
-                                                ICON_FULLSCREEN_EXIT.rich_text().size(16.0)
-                                            } else {
-                                                ICON_FULLSCREEN.rich_text().size(16.0)
-                                            })
-                                            .fill(C_RAISED)
-                                            .min_size(egui::vec2(28.0, 28.0)),
+                                            egui::Button::image(egui::Image::new(fs_icon_url).fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                                .fill(C_RAISED)
+                                                .min_size(egui::vec2(28.0, 28.0)),
                                         )
                                         .clicked()
                                     {
@@ -754,11 +711,11 @@ impl App for NewPlayerApp {
                                         .map(|t| t.label.clone())
                                         .unwrap_or_else(|| "Subs".to_string());
                                     let subs_resp = ui.add(
-                                        egui::Button::new(icon_label(
-                                            ui,
-                                            ICON_SUBTITLES,
+                                        egui::Button::image_and_text(
+                                            egui::Image::new("https://api.iconify.design/material-symbols/subtitles.svg?color=%23ffffff&height=16")
+                                                .fit_to_exact_size(egui::vec2(16.0, 16.0)),
                                             &sub_label,
-                                        ))
+                                        )
                                         .fill(C_RAISED)
                                         .min_size(egui::vec2(0.0, 24.0)),
                                     );
@@ -827,11 +784,11 @@ impl App for NewPlayerApp {
                                         .map(|t| t.label.clone())
                                         .unwrap_or_else(|| "Audio".to_string());
                                     let audio_resp = ui.add(
-                                        egui::Button::new(icon_label(
-                                            ui,
-                                            ICON_AUDIOTRACK,
+                                        egui::Button::image_and_text(
+                                            egui::Image::new("https://api.iconify.design/ic/baseline-audiotrack.svg?color=%23ffffff&height=16")
+                                                .fit_to_exact_size(egui::vec2(16.0, 16.0)),
                                             &audio_label,
-                                        ))
+                                        )
                                         .fill(C_RAISED)
                                         .min_size(egui::vec2(0.0, 24.0)),
                                     );

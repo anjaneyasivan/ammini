@@ -545,23 +545,17 @@ impl TelegramPanel {
                 .auto_shrink([false, false])
                 .max_height(10000.0)
                 .stick_to_bottom(true)
-                .show_rows(ui, 90.0, {
-                    let msgs = &fsm.data.messages;
-                    msgs.len() + if fsm.data.has_more_messages { 1 } else { 0 }
-                }, |ui, row_range| {
-                    let has_more = fsm.data.has_more_messages;
-                    let messages = &fsm.data.messages;
+                .show(ui, |ui| {
                     let scroll_target = fsm.data.search_target_message;
-                    for row in row_range {
-                        if has_more && row == 0 {
-                            if Self::load_more_button(ui, "Load older messages").clicked() {
-                                load_older = true;
-                            }
-                            ui.add_space(8.0);
-                            continue;
+                    if fsm.data.has_more_messages {
+                        if Self::load_more_button(ui, "Load older messages").clicked() {
+                            load_older = true;
                         }
-                        let i = if has_more { row - 1 } else { row };
-                        let Some(msg) = messages.get(i) else { continue; };
+                        ui.add_space(8.0);
+                    }
+
+                    let messages = &fsm.data.messages;
+                    for (i, msg) in messages.iter().enumerate() {
                         let is_me = msg.sender_is_self;
                         let starts_group = i == 0
                             || messages[i.saturating_sub(1)].sender != msg.sender

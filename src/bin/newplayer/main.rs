@@ -67,6 +67,8 @@ struct NewPlayerApp {
     pending_seek: Arc<std::sync::Mutex<Option<SeekTracker>>>,
     display_sleep: ammini::display_sleep::Guard,
     cache_coverage: HashMap<i32, CacheCoverage>,
+    byte_time_map: ammini::telegram::cache::ByteTimeMap,
+    byte_time_record_last: Option<std::time::Instant>,
     // telegram
     show_telegram: bool,
     telegram_fsm: StateMachine<TelegramFsm>,
@@ -173,6 +175,8 @@ impl NewPlayerApp {
             pending_seek: Arc::new(std::sync::Mutex::new(None)),
             display_sleep: ammini::display_sleep::Guard::new(),
             cache_coverage: HashMap::new(),
+            byte_time_map: ammini::telegram::cache::ByteTimeMap::default(),
+            byte_time_record_last: None,
             show_telegram: false,
             telegram_fsm,
             telegram_panel: TelegramPanel::new(),
@@ -412,7 +416,7 @@ impl NewPlayerApp {
             return Vec::new();
         };
         let duration = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
-        ammini::telegram::cache::byte_ranges_to_time_spans(&ranges, total_bytes, duration)
+        ammini::telegram::cache::byte_ranges_to_time_spans_mapped(&ranges, total_bytes, duration, &self.byte_time_map)
     }
 
     fn telegram_load_in_progress(&self) -> bool {
@@ -522,6 +526,21 @@ impl App for NewPlayerApp {
             events.push(PlayerEvent::OpenFile(p));
         }
         self.refresh_tracks();
+
+        // Learn the byte->time map for cache shading (throttled ~1 Hz).
+        let now = std::time::Instant::now();
+        let should_record = self
+            .byte_time_record_last
+            .map(|t| t.elapsed().as_secs_f64() >= 1.0)
+            .unwrap_or(true);
+        if should_record {
+            let t = self.player_mut().time_pos().ok().flatten();
+            let b = self.player_mut().mpv().get_property::<i64>("stream-pos").ok();
+            if let (Some(t), Some(b)) = (t, b) {
+                self.byte_time_map.record(b as u64, t);
+            }
+            self.byte_time_record_last = Some(now);
+        }
 
         events.push(PlayerEvent::Poll);
 
@@ -990,17 +1009,26 @@ impl App for NewPlayerApp {
                             .flatten()
                             .unwrap_or(1.0)
                             .max(1.0);
+                        // buffered
+                        let cache_col = C_TEXT.gamma_multiply(0.28);
+                        let rail_r = tl_visual.height() * 0.5;
                         for (s, e) in &cache_spans {
-                            let x0 = tl_visual.min.x + (s / dur) as f32 * tl_visual.width();
-                            let x1 = tl_visual.min.x + (e / dur) as f32 * tl_visual.width();
-                            painter.rect_filled(
-                                egui::Rect::from_min_max(
-                                    egui::pos2(x0, tl_visual.min.y),
-                                    egui::pos2(x1, tl_visual.max.y),
-                                ),
-                                3.0,
-                                egui::Color32::from_rgb(0x36, 0x36, 0x44),
+                            let x0 = tl_visual.min.x + ((s / dur).clamp(0.0, 1.0) as f32) * tl_visual.width();
+                            let x1 = tl_visual.min.x + ((e / dur).clamp(0.0, 1.0) as f32) * tl_visual.width();
+                            if x1 - x0 < 0.5 {
+                                continue;
+                            }
+                            let r = egui::Rect::from_min_max(
+                                egui::pos2(x0, tl_visual.min.y),
+                                egui::pos2(x1, tl_visual.max.y),
                             );
+                            let cr = egui::CornerRadius {
+                                nw: if x0 <= tl_visual.min.x + 0.5 { rail_r as u8 } else { 0 },
+                                sw: if x0 <= tl_visual.min.x + 0.5 { rail_r as u8 } else { 0 },
+                                ne: if x1 >= tl_visual.max.x - 0.5 { rail_r as u8 } else { 0 },
+                                se: if x1 >= tl_visual.max.x - 0.5 { rail_r as u8 } else { 0 },
+                            };
+                            painter.rect_filled(r, cr, cache_col);
                         }
                         // played
                         let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
@@ -1280,6 +1308,13 @@ impl App for NewPlayerApp {
         }
 
         for event in events {
+            if matches!(
+                event,
+                PlayerEvent::OpenFile(_) | PlayerEvent::OpenUrl(_) | PlayerEvent::OpenTelegramUrl(_)
+            ) {
+                self.byte_time_map = ammini::telegram::cache::ByteTimeMap::default();
+                self.byte_time_record_last = None;
+            }
             match event {
                 PlayerEvent::Poll => trace!("poll"),
                 _ => debug!("{event:?}"),

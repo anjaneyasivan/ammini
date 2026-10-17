@@ -70,6 +70,68 @@ pub fn byte_ranges_to_time_spans(
         .collect()
 }
 
+/// Monotone byte→time samples gathered during playback.
+#[derive(Default, Clone)]
+pub struct ByteTimeMap {
+    pts: Vec<(u64, f64)>, // sorted by byte, time non-decreasing
+}
+
+impl ByteTimeMap {
+    pub fn record(&mut self, byte: u64, time: f64) {
+        match self.pts.binary_search_by_key(&byte, |p| p.0) {
+            Ok(i) => self.pts[i].1 = time,
+            Err(i) => self.pts.insert(i, (byte, time)),
+        }
+        // enforce monotonic time (drop samples broken by seeks/glitches)
+        let mut last = f64::MIN;
+        self.pts.retain(|p| {
+            let ok = p.1 >= last;
+            if ok {
+                last = p.1;
+            }
+            ok
+        });
+    }
+
+    pub fn to_time(&self, byte: u64, total: u64, duration: f64) -> f64 {
+        // anchors: (0,0) and (total,duration) plus samples
+        let lo = self
+            .pts
+            .iter()
+            .rev()
+            .find(|p| p.0 <= byte)
+            .copied()
+            .unwrap_or((0, 0.0));
+        let hi = self
+            .pts
+            .iter()
+            .find(|p| p.0 >= byte)
+            .copied()
+            .unwrap_or((total, duration));
+        if hi.0 == lo.0 {
+            return lo.1;
+        }
+        let f = (byte - lo.0) as f64 / (hi.0 - lo.0) as f64;
+        (lo.1 + f * (hi.1 - lo.1)).clamp(0.0, duration)
+    }
+}
+
+pub fn byte_ranges_to_time_spans_mapped(
+    ranges: &[(u64, u64)],
+    total: u64,
+    duration: f64,
+    map: &ByteTimeMap,
+) -> Vec<(f64, f64)> {
+    if duration <= 0.0 || total == 0 {
+        return Vec::new();
+    }
+    ranges
+        .iter()
+        .map(|&(s, e)| (map.to_time(s, total, duration), map.to_time(e, total, duration)))
+        .filter(|(s, e)| e - s > duration * 0.002) // drop moov/header probe slivers
+        .collect()
+}
+
 /// How long a failed block download is remembered before the block is retried. Long
 /// enough to keep a burst of waiters from hammering Telegram with the same doomed
 /// request, short enough that a refreshed document or a recovered connection resumes

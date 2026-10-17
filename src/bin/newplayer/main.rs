@@ -1166,8 +1166,18 @@ impl App for NewPlayerApp {
                                 }
                                 "subtitles" => {
                                     ui.label(egui::RichText::new("Subtitle tracks").color(C_MUTED));
-                                    for t in &self.subtitle_tracks {
-                                        ui.label(egui::RichText::new(&t.label).color(C_TEXT));
+                                    for t in self.subtitle_tracks.clone() {
+                                        if ui.selectable_label(t.selected, &t.label).clicked() {
+                                            if let Ok(()) = self
+                                                .player_mut()
+                                                .mpv()
+                                                .set_property("sid", t.id)
+                                            {
+                                                for tr in &mut self.subtitle_tracks {
+                                                    tr.selected = tr.id == t.id;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 "settings" => {

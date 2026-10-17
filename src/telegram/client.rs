@@ -496,7 +496,32 @@ pub async fn next_messages_page(
 
 fn map_dialog(dialog: &grammers_client::peer::Dialog) -> DialogInfo {
     let peer_ref = dialog.peer_ref();
-    let name = dialog.peer().name().unwrap_or("Unknown").to_string();
+    let peer = dialog.peer();
+    let name = peer.name().unwrap_or("Unknown").to_string();
+    let username = peer.username().map(|s| s.to_string());
+    let is_verified = match peer {
+        grammers_client::peer::Peer::User(u) => u.verified(),
+        grammers_client::peer::Peer::Channel(c) => c.raw.verified,
+        _ => false,
+    };
+    let is_muted = false;
+    let is_pinned = match &dialog.raw {
+        grammers_client::tl::enums::Dialog::Dialog(d) => d.pinned,
+        _ => false,
+    };
+    let unread_count = match &dialog.raw {
+        grammers_client::tl::enums::Dialog::Dialog(d) => d.unread_count,
+        _ => 0,
+    };
+    let dialog_type = match peer {
+        grammers_client::peer::Peer::User(u) => {
+            if u.is_bot() { "bot" } else { "direct" }
+        }
+        grammers_client::peer::Peer::Channel(c) => {
+            if matches!(c.kind(), Some(grammers_session::types::ChannelKind::Broadcast)) { "channel" } else { "group" }
+        }
+        grammers_client::peer::Peer::Group(_) => "group",
+    };
     let last_message = dialog.last_message.as_ref().map(|m| {
         let text = m.text();
         if text.is_empty() {
@@ -508,6 +533,12 @@ fn map_dialog(dialog: &grammers_client::peer::Dialog) -> DialogInfo {
     DialogInfo {
         peer_ref,
         name,
+        username,
+        dialog_type,
+        is_verified,
+        is_muted,
+        is_pinned,
+        unread_count,
         last_message,
     }
 }
@@ -675,6 +706,12 @@ fn format_datetime(dt: &chrono::DateTime<chrono::Utc>) -> String {
 pub struct DialogInfo {
     pub peer_ref: PeerRef,
     pub name: String,
+    pub username: Option<String>,
+    pub dialog_type: &'static str, // "bot" | "direct" | "channel" | "group" | "official"
+    pub is_verified: bool,
+    pub is_muted: bool,
+    pub is_pinned: bool,
+    pub unread_count: i32,
     pub last_message: Option<String>,
 }
 

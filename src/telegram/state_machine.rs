@@ -64,6 +64,7 @@ pub struct TelegramData {
     pub selected_chat_name: Option<String>,
     pub has_more_dialogs: bool,
     pub has_more_messages: bool,
+    pub dialog_filter: String,
     pub loading_video: bool,
     pub current_video: Option<i32>,
 }

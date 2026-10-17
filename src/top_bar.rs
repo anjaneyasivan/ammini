@@ -19,23 +19,16 @@ pub fn show(
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(12.0);
-                    for (id, icon_bytes, on) in [
+                    for (id, icon, on) in [
                         (
                             "nav",
-                            &include_bytes!("../assets/icons/newplayer/kl-circle-menu-fill.svg")[..],
+                            ammini::icons::ICON_KL_CIRCLE_MENU_FILL,
                             *nav_rail_open,
                         ),
-                        (
-                            "chat",
-                            &include_bytes!("../assets/icons/newplayer/kl-send-fill.svg")[..],
-                            *chats_open,
-                        ),
-                        (
-                            "insp",
-                            &include_bytes!("../assets/icons/newplayer/kl-info-fill.svg")[..],
-                            *inspector_open,
-                        ),
+                        ("chat", ammini::icons::ICON_KL_SEND_FILL, *chats_open),
+                        ("insp", ammini::icons::ICON_KL_INFO_FILL, *inspector_open),
                     ] {
+                        let icon_bytes = icon.1;
                         let fill = if on { C_RAISED2 } else { C_RAISED };
                         let txt_col = if on { C_TEXT } else { C_DIM };
                         let btn = ui

@@ -1,6 +1,7 @@
 pub mod display_sleep;
 pub mod fonts;
 pub mod fsm;
+pub mod icons;
 pub mod proxy;
 pub mod style;
 pub mod telegram;

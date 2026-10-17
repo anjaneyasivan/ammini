@@ -917,7 +917,8 @@ impl App for NewPlayerApp {
                                                     .corner_radius(6.0)
                                                     .inner_margin(egui::Margin::same(6))
                                                     .show(ui, |ui| {
-                                                        ui.set_min_width(180.0);
+                                                        ui.set_min_width(120.0);
+                                                        ui.set_max_width(160.0);
                                                         ui.set_max_height(240.0);
                                                         egui::ScrollArea::vertical()
                                                             .max_height(200.0)
@@ -1017,7 +1018,8 @@ impl App for NewPlayerApp {
                                                     .corner_radius(6.0)
                                                     .inner_margin(egui::Margin::same(6))
                                                     .show(ui, |ui| {
-                                                        ui.set_min_width(180.0);
+                                                        ui.set_min_width(120.0);
+                                                        ui.set_max_width(160.0);
                                                         for t in self.audio_tracks.clone() {
                                                             let label = if t.selected {
                                                                 format!("✓ {}", t.label)

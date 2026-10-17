@@ -1229,31 +1229,8 @@ impl App for NewPlayerApp {
                                         .ui(ui, &mut self.telegram_fsm, &self.bg_tx);
                                 }
                                 "recent" => {
-                                    let recent_files = self.fsm.persistent.recent_files.clone();
-                                    if recent_files.is_empty() {
-                                        ui.label(
-                                            egui::RichText::new("No recent files").color(C_MUTED),
-                                        );
-                                    } else {
-                                        egui::ScrollArea::vertical().max_height(260.0).show(
-                                            ui,
-                                            |ui| {
-                                                for path in &recent_files {
-                                                    if ui
-                                                        .button(
-                                                            path.rsplit('/').next().unwrap_or(path),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        self.pending_open_file = Some(path.clone());
-                                                    }
-                                                }
-                                            },
-                                        );
-                                    }
-                                    ui.add_space(8.0);
                                     ui.label(
-                                        egui::RichText::new("RECENT TELEGRAM")
+                                        egui::RichText::new("RECENTLY PLAYED")
                                             .monospace()
                                             .size(11.0)
                                             .strong()
@@ -1267,27 +1244,58 @@ impl App for NewPlayerApp {
                                                 .color(C_MUTED),
                                         );
                                     } else {
-                                        egui::ScrollArea::vertical().max_height(260.0).show(
-                                            ui,
-                                            |ui| {
-                                                for entry in &recent_tg {
-                                                    let label = format!(
-                                                        "{} · {}",
-                                                        entry.chat_name, entry.name
-                                                    );
-                                                    if ui.button(&label).clicked() {
-                                                        if let Some(bg) = &self.bg_tx {
-                                                            let _ = bg.send(
-                                                                BgCommand::PlayTelegramVideo {
-                                                                    peer: entry.peer,
-                                                                    msg_id: entry.msg_id,
-                                                                },
-                                                            );
-                                                        }
+                                        egui::ScrollArea::vertical().show(ui, |ui| {
+                                            for entry in &recent_tg {
+                                                let (rect, resp) = ui.allocate_exact_size(
+                                                    egui::vec2(ui.available_width(), 52.0),
+                                                    egui::Sense::click(),
+                                                );
+                                                ui.painter().rect_filled(
+                                                    rect,
+                                                    4.0,
+                                                    if resp.hovered() {
+                                                        C_RAISED
+                                                    } else {
+                                                        egui::Color32::TRANSPARENT
+                                                    },
+                                                );
+                                                ui.painter().text(
+                                                    rect.left_top() + egui::vec2(8.0, 6.0),
+                                                    egui::Align2::LEFT_TOP,
+                                                    &entry.chat_name,
+                                                    egui::FontId::proportional(12.0),
+                                                    C_TEXT,
+                                                );
+                                                let name = if entry.name.chars().count() > 46 {
+                                                    format!(
+                                                        "{}…",
+                                                        entry
+                                                            .name
+                                                            .chars()
+                                                            .take(46)
+                                                            .collect::<String>()
+                                                    )
+                                                } else {
+                                                    entry.name.clone()
+                                                };
+                                                ui.painter().text(
+                                                    rect.left_top() + egui::vec2(8.0, 24.0),
+                                                    egui::Align2::LEFT_TOP,
+                                                    &name,
+                                                    egui::FontId::monospace(10.0),
+                                                    C_MUTED,
+                                                );
+                                                if resp.clicked() {
+                                                    if let Some(bg) = &self.bg_tx {
+                                                        let _ =
+                                                            bg.send(BgCommand::PlayTelegramVideo {
+                                                                peer: entry.peer,
+                                                                msg_id: entry.msg_id,
+                                                            });
                                                     }
                                                 }
-                                            },
-                                        );
+                                            }
+                                        });
                                     }
                                 }
                                 "library" => {

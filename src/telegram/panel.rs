@@ -439,7 +439,7 @@ impl TelegramPanel {
             egui::ScrollArea::vertical()
                 .id_salt(("tg_messages", &chat_key))
                 .auto_shrink([false, false])
-                .max_height(600.0)
+                .max_height(10000.0)
                 .stick_to_bottom(true)
                 .show_rows(ui, 90.0, {
                     let msgs = &fsm.data.messages;

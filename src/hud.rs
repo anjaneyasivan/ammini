@@ -70,7 +70,7 @@ impl AmminiApp {
                     window_rect.max.y - hud_h - hud_bottom_padding,
                 ))
                 .default_size(egui::vec2(hud_w, hud_h))
-                .show(&ctx, |ui| {
+                .show(ctx, |ui| {
                     ui.set_opacity(hud_alpha);
                     let vw = hud_w;
                     ui.set_min_size(egui::vec2(vw, hud_h));
@@ -175,7 +175,6 @@ impl AmminiApp {
                             self.volume_popup_hovered = show_popup;
                             if show_popup {
                                 self.last_input = std::time::Instant::now();
-                                let popup_rect = popup_rect;
                                 egui::Area::new("volume_popup".into())
                                     .order(egui::Order::Tooltip)
                                     .fixed_pos(popup_rect.min)

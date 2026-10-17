@@ -179,6 +179,18 @@ impl App for AmminiApp {
         } else {
             player_response.inner.rect
         };
+        // Double-click on the video (fullscreen): toggle fullscreen. The player
+        // widget itself is zero-sized in fullscreen, so handle it here.
+        if is_fullscreen {
+            let resp = ui.interact(
+                video_rect,
+                egui::Id::new("video_double_click_fs"),
+                egui::Sense::click(),
+            );
+            if resp.double_clicked() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            }
+        }
         let hovered = ctx
             .pointer_hover_pos()
             .map(|p| video_rect.contains(p) || p.y < 40.0)

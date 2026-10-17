@@ -14,6 +14,7 @@ pub fn show(
     active_tab: &mut &'static str,
     chats_open: &mut bool,
     show_telegram: &mut bool,
+    settings_menu_open: &mut bool,
 ) {
     if !open {
         return;
@@ -71,5 +72,19 @@ pub fn show(
                     ui.add_space(4.0);
                 }
             });
+            ui.add_space(ui.available_height().max(0.0));
+            if iconify_icon(
+                ui,
+                icon_cache,
+                ctx,
+                "material-symbols",
+                "settings",
+                "#ffffff",
+                20,
+                None,
+            ) {
+                *settings_menu_open = !*settings_menu_open;
+            }
+            ui.add_space(8.0);
         });
 }

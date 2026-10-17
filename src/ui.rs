@@ -122,7 +122,10 @@ impl App for AmminiApp {
             &mut self.active_tab,
             &mut self.chats_open,
             &mut self.show_telegram,
+            &mut self.settings_menu_open,
         );
+
+        self.render_settings_menu(&ctx);
 
         // Central viewport with SharkPlayer (HUD disabled; custom HUD below)
         let (player_response, cache_spans) = {

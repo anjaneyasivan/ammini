@@ -1,4 +1,3 @@
-use ammini::fonts::icon_label;
 use ammini::fsm::{
     FsmState, PersistentState, PlayerEvent, PlayerFsm, RecentTelegram, record_recent_telegram,
     track_label,
@@ -10,74 +9,32 @@ use ammini::telegram::{BgCommand, UiMessage, start};
 use ammini::telemetry::{Metric, SeekTracker, TelemetryEvent};
 use ammini::update::UpdateAvailable;
 use eframe::{App, Frame, NativeOptions, egui};
-use egui_material_icons::{MaterialIcon, icons::*};
+// iconify images are loaded via egui_extras image loaders (installed in App::new)
 use egui_sharkplayer::{PlayerState, SharkPlayer};
 use rfd::FileDialog;
 use statig::blocking::StateMachine;
 use statig::prelude::*;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, info, trace};
 
-/// eframe storage key. Deliberately kept as the app's former name (`min_mpv_state`)
-/// so existing saves (recent files, playlist, volume, resume positions, recent
-/// Telegram videos) keep loading after the rename to Ammini.
+mod iconify;
+mod left_sidebar;
+mod right_sidebar;
+mod theme;
+mod top_bar;
+
+use crate::theme::*;
+use iconify::IconCache;
+
 const APP_KEY: &str = "min_mpv_state";
 const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
 
-/// Material icons for the on-video control bar (play/pause, seek, volume, fullscreen)
-/// rendered by egui-sharkplayer. The crate's default provider uses plain text ("<<",
-/// ">>", "▶"…) for these; our bundled material-icons font covers them properly.
-struct PlayerControlIcons;
-
-/// Icon size for the on-video control bar. The crate lays the bar out at 40px and
-/// buttons inherit egui's 13px `TextStyle::Button`, which reads small over video.
-const PLAYER_ICON_SIZE: f32 = 20.0;
-
-fn player_icon(icon: MaterialIcon) -> egui::WidgetText {
-    icon.rich_text().size(PLAYER_ICON_SIZE).into()
-}
-
-impl egui_sharkplayer::ControlsIconProvider for PlayerControlIcons {
-    fn play(&self) -> egui::WidgetText {
-        player_icon(ICON_PLAY_ARROW)
-    }
-    fn pause(&self) -> egui::WidgetText {
-        player_icon(ICON_PAUSE)
-    }
-    fn skip_backward(&self) -> egui::WidgetText {
-        player_icon(ICON_SKIP_PREVIOUS)
-    }
-    fn skip_forward(&self) -> egui::WidgetText {
-        player_icon(ICON_SKIP_NEXT)
-    }
-    fn info(&self) -> egui::WidgetText {
-        player_icon(ICON_INFO)
-    }
-    fn muted_volume(&self) -> egui::WidgetText {
-        player_icon(ICON_VOLUME_OFF)
-    }
-    fn low_volume(&self) -> egui::WidgetText {
-        player_icon(ICON_VOLUME_MUTE)
-    }
-    fn medium_volume(&self) -> egui::WidgetText {
-        player_icon(ICON_VOLUME_DOWN)
-    }
-    fn high_volume(&self) -> egui::WidgetText {
-        player_icon(ICON_VOLUME_UP)
-    }
-    fn fullscreen(&self) -> egui::WidgetText {
-        player_icon(ICON_FULLSCREEN)
-    }
-    fn fullscreen_exit(&self) -> egui::WidgetText {
-        player_icon(ICON_FULLSCREEN_EXIT)
-    }
-}
-
-/// A media track (audio or subtitle) discovered via mpv's scalar `track-list/N/*`
-/// sub-properties.
+// ---------------------------------------------------------------------------
+// Media track
+// ---------------------------------------------------------------------------
 #[derive(Clone)]
 struct MediaTrack {
     id: i64,
@@ -85,74 +42,81 @@ struct MediaTrack {
     selected: bool,
 }
 
-struct AmminiApp {
-    fsm: StateMachine<PlayerFsm>,
-    url_input: String,
-    show_url_dialog: bool,
-    telegram_fsm: StateMachine<TelegramFsm>,
-    telegram_panel: TelegramPanel,
-    show_telegram: bool,
-    bg_tx: Option<UnboundedSender<BgCommand>>,
-    ui_rx: UnboundedReceiver<UiMessage>,
-    /// egui id of the video surface, captured each frame so global shortcuts don't
-    /// double-handle keys the SharkPlayer widget already owns while focused.
-    video_focus_id: Option<egui::Id>,
-    /// Audio tracks of the currently loaded media (empty until media is loaded).
-    audio_tracks: Vec<MediaTrack>,
-    /// Subtitle tracks of the currently loaded media (empty until media is loaded).
-    subtitle_tracks: Vec<MediaTrack>,
-    /// Last seen `track-list/count`, so the lists are only rebuilt when it changes.
-    audio_track_count: i64,
-    subtitle_track_count: i64,
-    /// Set by the SharkPlayer seek callback (arrow keys / J / L / skip buttons);
-    /// drained once per frame to measure seek latency. Shared with the widget via
-    /// an Arc because the callback outlives the frame that installed it.
-    pending_seek: Arc<std::sync::Mutex<Option<SeekTracker>>>,
-    /// Keeps the display awake while media is actually playing (released on pause).
-    /// Backed by IOKit on macOS and `SetThreadExecutionState` on Windows; a no-op where
-    /// the platform has no backend.
-    display_sleep: ammini::display_sleep::Guard,
-    /// Per-message disk-cache coverage of Telegram videos (msg_id → total bytes +
-    /// cached byte ranges), refreshed once per second by the bg thread so the
-    /// seekbar can shade the cached parts.
-    cache_coverage: HashMap<i32, CacheCoverage>,
-    /// Startup release check (see `ammini::update`). Drained each frame; carries at
-    /// most one newer version per launch.
-    update_rx: UnboundedReceiver<UpdateAvailable>,
-    /// A newer release reported by the startup check, if any (kept so the top bar
-    /// can reopen the alert after it is dismissed).
-    update: Option<UpdateAvailable>,
-    /// Whether the update alert window is currently shown.
-    show_update_dialog: bool,
-}
-
-/// Byte coverage of a Telegram video's disk block cache as published by the bg
-/// thread (see `UiMessage::CacheCoverage`).
+// ---------------------------------------------------------------------------
+// Cache coverage
+// ---------------------------------------------------------------------------
 #[derive(Clone, Default)]
 struct CacheCoverage {
     total_bytes: u64,
     ranges: Vec<(u64, u64)>,
 }
 
-impl AmminiApp {
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
+struct NewPlayerApp {
+    // player
+    fsm: StateMachine<PlayerFsm>,
+    url_input: String,
+    show_url_dialog: bool,
+    video_focus_id: Option<egui::Id>,
+    audio_tracks: Vec<MediaTrack>,
+    subtitle_tracks: Vec<MediaTrack>,
+    audio_track_count: i64,
+    subtitle_track_count: i64,
+    pending_seek: Arc<std::sync::Mutex<Option<SeekTracker>>>,
+    display_sleep: ammini::display_sleep::Guard,
+    cache_coverage: HashMap<i32, CacheCoverage>,
+    byte_time_map: ammini::telegram::cache::ByteTimeMap,
+    byte_time_record_last: Option<std::time::Instant>,
+    // telegram
+    show_telegram: bool,
+    telegram_fsm: StateMachine<TelegramFsm>,
+    telegram_panel: TelegramPanel,
+    bg_tx: Option<UnboundedSender<BgCommand>>,
+    ui_rx: UnboundedReceiver<UiMessage>,
+    // update
+    update_rx: UnboundedReceiver<UpdateAvailable>,
+    update: Option<UpdateAvailable>,
+    show_update_dialog: bool,
+    // ui
+    active_tab: &'static str,
+    nav_rail_open: bool,
+    chats_open: bool,
+    inspector_open: bool,
+    icon_cache: Arc<Mutex<IconCache>>,
+    hud_hover: Option<(std::time::Instant, egui::Pos2)>,
+    last_input: std::time::Instant,
+    audio_menu_open: bool,
+    subs_menu_open: bool,
+    frame_count: u64,
+    menu_opened_frame: u64,
+    pending_open_file: Option<String>,
+}
+
+impl NewPlayerApp {
     fn new(
         cc: &eframe::CreationContext<'_>,
-        bg_tx: Option<UnboundedSender<BgCommand>>,
-        ui_rx: UnboundedReceiver<UiMessage>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Install the custom font stack (modern emoji + system script fallbacks) before
-        // any UI is drawn.
         ammini::fonts::install(&cc.egui_ctx);
-        // Material icon glyphs must be registered AFTER `fonts::install` (which uses
-        // `set_fonts` and would replace them); `initialize` uses `add_font`, which merges.
         egui_material_icons::initialize(&cc.egui_ctx);
-        // macOS-style spacing/radii/theme after the fonts are in place.
         ammini::style::install(&cc.egui_ctx);
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+
+        // STYLE.md: dark-only token theme and 4px-grid spacing.
+        let mut visuals = egui::Visuals::dark();
+        visuals.panel_fill = C_TOOLBAR;
+        visuals.window_fill = C_RAISED;
+        visuals.override_text_color = Some(C_TEXT);
+        cc.egui_ctx.set_visuals(visuals);
+        cc.egui_ctx.global_style_mut(|style| {
+            style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+            style.spacing.button_padding = egui::vec2(10.0, 6.0);
+        });
 
         let player = PlayerState::new(cc).map_err(|e| {
-            Box::new(std::io::Error::other(format!(
-                "failed to initialize player: {e}"
-            ))) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(format!("player init: {e}")))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         let persistent: PersistentState = cc
@@ -185,103 +149,65 @@ impl AmminiApp {
         let mut telegram_fsm = TelegramFsm::new().state_machine();
         telegram_fsm.init();
 
-        // One-shot release check (notification only). Started here, not in `main`,
-        // so it can wake the UI with `request_repaint` when it finds an update.
+        let (bg_tx, ui_rx) = match TelegramConfig::from_env() {
+            Ok(cfg) => {
+                let (tx, rx) = start(cfg);
+                (Some(tx), rx)
+            }
+            Err(e) => {
+                eprintln!("telegram disabled: {e}");
+                let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                (None, rx)
+            }
+        };
+
         let update_rx = ammini::update::start(cc.egui_ctx.clone());
 
         let mut app = Self {
             fsm,
             url_input: String::new(),
             show_url_dialog: false,
-            telegram_fsm,
-            telegram_panel: TelegramPanel::new(),
-            show_telegram: false,
-            bg_tx,
-            ui_rx,
             video_focus_id: None,
             audio_tracks: Vec::new(),
-            audio_track_count: 0,
             subtitle_tracks: Vec::new(),
+            audio_track_count: 0,
             subtitle_track_count: 0,
             pending_seek: Arc::new(std::sync::Mutex::new(None)),
             display_sleep: ammini::display_sleep::Guard::new(),
             cache_coverage: HashMap::new(),
+            byte_time_map: ammini::telegram::cache::ByteTimeMap::default(),
+            byte_time_record_last: None,
+            show_telegram: false,
+            telegram_fsm,
+            telegram_panel: TelegramPanel::new(),
+            bg_tx,
+            ui_rx,
             update_rx,
             update: None,
             show_update_dialog: false,
+            active_tab: "telegram",
+            nav_rail_open: true,
+            chats_open: true,
+            inspector_open: false,
+            icon_cache: IconCache::new_shared(),
+            hud_hover: None,
+            last_input: std::time::Instant::now(),
+            audio_menu_open: false,
+            subs_menu_open: false,
+            frame_count: 0,
+            menu_opened_frame: 0,
+            pending_open_file: None,
         };
         app.fsm.init();
-        info!("app initialized");
         Ok(app)
     }
 
     fn player_mut(&mut self) -> &mut PlayerState {
-        // SAFETY: we only mutate the player for rendering and cleanup; the state
-        // machine itself never holds a reference to the player.
         unsafe { &mut self.fsm.inner_mut().player }
     }
 
     fn proxy_url_mut(&mut self) -> &mut Option<String> {
-        // SAFETY: proxy_url is only mutated outside state machine handlers; it is not
-        // part of the state machine's invariants.
         unsafe { &mut self.fsm.inner_mut().proxy_url }
-    }
-
-    fn status_mut(&mut self) -> &mut String {
-        // SAFETY: status is only mutated outside state machine handlers; it is not
-        // part of the state machine's invariants.
-        unsafe { &mut self.fsm.inner_mut().status }
-    }
-
-    /// Record the current playback offset (and pin the local file at the front of the
-    /// recent list) immediately before a keyboard quit. `App::save` does this too, but
-    /// doing it on the keypress guarantees the resume map is up to date regardless of
-    /// how eframe tears the window down (Cmd+Q on macOS reaches `Event::LoopExiting`
-    /// rather than the normal close path).
-    fn record_session_before_close(&mut self) {
-        // SAFETY: `finalize_session` touches only plain UI data (resume map, recent
-        // files) and reads the playback position — no state-machine invariants.
-        unsafe { self.fsm.inner_mut().finalize_session() };
-    }
-
-    fn open_file_dialog(&self) -> Option<PlayerEvent> {
-        FileDialog::new()
-            .add_filter("Video files", VIDEO_EXTS)
-            .pick_file()
-            .map(|p| PlayerEvent::OpenFile(p.to_string_lossy().to_string()))
-    }
-
-    fn open_folder_dialog(&mut self) -> Vec<PlayerEvent> {
-        let mut events = Vec::new();
-        if let Some(folder) = FileDialog::new().pick_folder() {
-            let mut videos: Vec<String> = std::fs::read_dir(&folder)
-                .ok()
-                .map(|iter| {
-                    iter.filter_map(|e| e.ok())
-                        .filter(|e| {
-                            e.path()
-                                .extension()
-                                .and_then(|ext| ext.to_str())
-                                .map(|ext| VIDEO_EXTS.contains(&ext.to_lowercase().as_str()))
-                                .unwrap_or(false)
-                        })
-                        .map(|e| e.path().to_string_lossy().to_string())
-                        .collect()
-                })
-                .unwrap_or_default();
-            videos.sort();
-
-            if !videos.is_empty() {
-                let first = videos.remove(0);
-                events.push(PlayerEvent::OpenFile(first));
-                for v in videos {
-                    events.push(PlayerEvent::AddToPlaylist(vec![v]));
-                }
-            } else {
-                *self.status_mut() = "No video files found in folder".into();
-            }
-        }
-        events
     }
 
     fn handle_dropped_files(&mut self, ctx: &egui::Context, events: &mut Vec<PlayerEvent>) {
@@ -298,51 +224,34 @@ impl AmminiApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context, events: &mut Vec<PlayerEvent>) {
-        // Close/quit must fire even while a text field has focus. Both go through
-        // `ViewportCommand::Close` so eframe runs `App::save` (which finalizes the
-        // session: resume offset + recent-file entry) before exiting. On macOS, the
-        // winit-installed Quit menu item already intercepts Cmd+Q and funnels it into
-        // the same save-on-exit path; this keeps Cmd+W (no menu item) and non-macOS
-        // builds working too.
         if ctx.input(|i| i.key_pressed(egui::Key::W) && i.modifiers.command) {
-            self.record_session_before_close();
+            unsafe { self.fsm.inner_mut().finalize_session() };
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Q) && i.modifiers.command) {
-            self.record_session_before_close();
+            unsafe { self.fsm.inner_mut().finalize_session() };
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
-
-        // Let text fields (URL dialog, Telegram auth inputs) own the keyboard.
         if ctx.egui_wants_keyboard_input() {
             return;
         }
-
-        // Esc leaves fullscreen no matter what has focus.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
             if is_fullscreen {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
             }
         }
-
-        // Transport keys are handled by the SharkPlayer widget while the video surface
-        // has focus; these app-level fallbacks cover clicks elsewhere in the window.
         let video_focused = self
             .video_focus_id
             .is_some_and(|id| ctx.memory(|m| m.has_focus(id)));
         if !video_focused {
-            if ctx.input(|i| i.key_pressed(egui::Key::Space))
-                && let Err(e) = self.player_mut().toggle_pause()
-            {
-                tracing::warn!("failed to toggle pause: {e}");
+            if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
+                let _ = self.player_mut().toggle_pause();
             }
-            if ctx.input(|i| i.key_pressed(egui::Key::M))
-                && let Err(e) = self.player_mut().toggle_mute()
-            {
-                tracing::warn!("failed to toggle mute: {e}");
+            if ctx.input(|i| i.key_pressed(egui::Key::M)) {
+                let _ = self.player_mut().toggle_mute();
             }
             let volume_delta = if ctx
                 .input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
@@ -364,37 +273,31 @@ impl AmminiApp {
                 let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
             }
-            // Arrow keys seek (matching the widget's keybinds, keyframe-relative)
-            // so they work even when the video surface was never focused. Command+arrow
-            // is reserved for previous/next track, so those don't seek here.
-            if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) && !i.modifiers.command)
-                && let Err(e) = self.player_mut().seek_relative(10.0)
-            {
-                tracing::warn!("failed to seek forward: {e}");
+            if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) && !i.modifiers.command) {
+                let _ = self.player_mut().seek_relative(10.0);
             }
-            if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft) && !i.modifiers.command)
-                && let Err(e) = self.player_mut().seek_relative(-10.0)
-            {
-                tracing::warn!("failed to seek backward: {e}");
+            if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft) && !i.modifiers.command) {
+                let _ = self.player_mut().seek_relative(-10.0);
             }
         }
-
-        if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift)
-            && let Some(e) = self.open_file_dialog()
-        {
-            events.push(e);
-        }
-        if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && i.modifiers.shift) {
-            events.extend(self.open_folder_dialog());
+        if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift) {
+            if let Some(path) = FileDialog::new()
+                .add_filter("Video files", VIDEO_EXTS)
+                .pick_file()
+            {
+                events.push(PlayerEvent::OpenFile(path.to_string_lossy().to_string()));
+            }
         }
         if ctx.input(|i| i.key_pressed(egui::Key::U) && i.modifiers.command) {
             self.show_url_dialog = true;
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::P) && i.modifiers.command) {
-            events.push(PlayerEvent::TogglePlaylist);
-        }
         if ctx.input(|i| i.key_pressed(egui::Key::T) && i.modifiers.command) {
             self.show_telegram = !self.show_telegram;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::R) && !i.modifiers.command && !i.modifiers.shift)
+        {
+            self.active_tab = "recent";
+            self.chats_open = true;
         }
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) && i.modifiers.command) {
             events.push(PlayerEvent::Next);
@@ -408,7 +311,6 @@ impl AmminiApp {
         if !self.show_url_dialog {
             return;
         }
-
         let mut close = false;
         egui::Window::new("Open URL")
             .collapsible(false)
@@ -419,170 +321,39 @@ impl AmminiApp {
                     ui.text_edit_singleline(&mut self.url_input);
                 });
                 ui.horizontal(|ui| {
-                    if ui.button(icon_label(ui, ICON_CHECK, "Load")).clicked()
-                        && !self.url_input.trim().is_empty()
-                    {
-                        let url = self.url_input.trim().to_string();
-                        info!("user submitted URL: {url}");
-                        events.push(PlayerEvent::OpenUrl(url));
+                    if ui.button("Load").clicked() && !self.url_input.trim().is_empty() {
+                        events.push(PlayerEvent::OpenUrl(self.url_input.trim().to_string()));
                         close = true;
                     }
-                    if ui.button(icon_label(ui, ICON_CLOSE, "Cancel")).clicked() {
+                    if ui.button("Cancel").clicked() {
                         close = true;
                     }
                 });
             });
-
         if close {
             self.show_url_dialog = false;
             self.url_input.clear();
         }
     }
 
-    /// Handle a newer version from the startup check: surface the alert and record it.
-    fn on_update_available(&mut self, update: UpdateAvailable) {
-        info!("update available: {} -> {}", update.current, update.latest);
-        ammini::telemetry::emit(TelemetryEvent::UpdateAvailable {
-            current: update.current.clone(),
-            latest: update.latest.clone(),
-        });
-        self.update = Some(update);
-        self.show_update_dialog = true;
-    }
-
-    /// The launch "new version available" alert. Notification only: "Get update"
-    /// opens the GitHub Release in the browser; Ammini never replaces its own files.
-    fn handle_update_dialog(&mut self, ctx: &egui::Context) {
-        if !self.show_update_dialog {
-            return;
-        }
-        let Some(update) = self.update.clone() else {
-            self.show_update_dialog = false;
-            return;
-        };
-
-        let mut close = false;
-        egui::Window::new("Update available")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
-                ui.label(format!("Ammini {} is available.", update.latest));
-                ui.label(format!("You're running {}.", update.current));
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .button(icon_label(ui, ICON_SYSTEM_UPDATE, "Get update"))
-                        .clicked()
-                    {
-                        if let Err(e) = open_in_browser(&update.url) {
-                            tracing::warn!("failed to open {}: {e}", update.url);
-                        }
-                        close = true;
-                    }
-                    if ui.button(icon_label(ui, ICON_CLOSE, "Later")).clicked() {
-                        close = true;
-                    }
-                });
-            });
-
-        if close {
-            self.show_update_dialog = false;
-        }
-    }
-
-    /// Detect an in-flight arrow/skip seek whose playback has resumed past the
-    /// seek target, and emit the seek-latency metric. Runs once per frame.
-    fn poll_seek(&mut self) {
-        let pending = self.pending_seek.clone();
-        let Some(mut tracker) = pending.lock().unwrap().take() else {
-            return;
-        };
-        if tracker.elapsed() > ammini::telemetry::SEEK_PENDING_TIMEOUT {
-            return; // seek never resumed (e.g. paused and never unpaused) — drop
-        }
-        if let Ok(Some(position)) = self.player_mut().time_pos()
-            && let Some(ms) = tracker.poll(position)
-        {
-            ammini::telemetry::emit(TelemetryEvent::Metric(Metric::SeekLatencyMs { ms }));
-        }
-    }
-
-    /// Hold/release the macOS display-sleep assertion based on whether media is
-    /// actually playing (loaded and unpaused), so the screen doesn't dim during
-    /// playback but macOS's normal dim/sleep behavior applies while paused. Runs
-    /// once per frame; `set_playing` is idempotent.
-    fn update_display_sleep(&mut self) {
-        let playing = !self.player_mut().paused().unwrap_or(true)
-            && matches!(self.player_mut().duration(), Ok(Some(_)));
-        self.display_sleep.set_playing(playing);
-    }
-
-    /// True while the player FSM is still in its `loading` state for a Telegram
-    /// video — the file's initial fetch hasn't produced playable media yet. Drives
-    /// the loading overlay over the video; local files load too fast to matter.
-    fn telegram_load_in_progress(&self) -> bool {
-        if !matches!(self.fsm.state(), FsmState::Loading { .. }) {
-            return false;
-        }
-        self.fsm
-            .playlist
-            .get(self.fsm.current_index.unwrap_or(0))
-            .is_some_and(|p| ammini::telegram::telegram_url_msg_id(p).is_some())
-    }
-
-    /// Time spans (seconds) of the currently playing path that are already in the
-    /// Telegram disk cache, for shading on the seekbar. Empty for non-Telegram paths,
-    /// unknown coverage, or before playback reports a duration.
-    fn current_cache_spans(&mut self) -> Vec<(f64, f64)> {
-        let Some(path) = self
-            .fsm
-            .playlist
-            .get(self.fsm.current_index.unwrap_or(0))
-            .cloned()
-        else {
-            return Vec::new();
-        };
-        let Some(msg_id) = ammini::telegram::telegram_url_msg_id(&path) else {
-            return Vec::new();
-        };
-        // Clone the (small) coverage out so the mutable player borrow below doesn't
-        // overlap the immutable cache map borrow.
-        let Some((total_bytes, ranges)) = self
-            .cache_coverage
-            .get(&msg_id)
-            .map(|c| (c.total_bytes, c.ranges.clone()))
-        else {
-            return Vec::new();
-        };
-        let duration = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
-        ammini::telegram::cache::byte_ranges_to_time_spans(&ranges, total_bytes, duration)
-    }
-
-    /// Refresh the audio and subtitle track lists from mpv. Only the scalar
-    /// `track-list/N/*` sub-properties are read (libmpv2 cannot read the `track-list`
-    /// node itself); each list is rebuilt only when its track count changes, so
-    /// steady-state costs one property read per frame. Called every frame before the
-    /// top bar.
     fn refresh_tracks(&mut self) {
         let loaded = matches!(self.player_mut().duration(), Ok(Some(_)));
         if !loaded {
-            if !self.audio_tracks.is_empty() || self.audio_track_count != 0 {
+            if !self.audio_tracks.is_empty() {
                 self.audio_tracks.clear();
                 self.audio_track_count = 0;
             }
-            if !self.subtitle_tracks.is_empty() || self.subtitle_track_count != 0 {
+            if !self.subtitle_tracks.is_empty() {
                 self.subtitle_tracks.clear();
                 self.subtitle_track_count = 0;
             }
             return;
         }
-
         let mut audio_tracks = Vec::new();
         let mut subtitle_tracks = Vec::new();
         let count = {
             let mpv = self.player_mut().mpv();
-            let count = mpv.get_property("track-list/count").unwrap_or(0);
+            let count: i64 = mpv.get_property("track-list/count").unwrap_or(0);
             for i in 0..count {
                 let Ok(kind) = mpv.get_property::<String>(&format!("track-list/{i}/type")) else {
                     continue;
@@ -617,9 +388,6 @@ impl AmminiApp {
             }
             count
         };
-
-        // Rebuild when either count changes or a list transitions empty ↔ non-empty;
-        // otherwise keep the cached lists (labels are stable).
         let unchanged = count == self.audio_track_count
             && count == self.subtitle_track_count
             && audio_tracks.is_empty() == self.audio_tracks.is_empty()
@@ -631,225 +399,85 @@ impl AmminiApp {
         self.subtitle_track_count = count;
         self.audio_tracks = audio_tracks;
         self.subtitle_tracks = subtitle_tracks;
-        tracing::debug!(
-            "media tracks: audio={:?} subs={:?}",
-            self.audio_tracks
-                .iter()
-                .map(|t| (t.id, t.label.clone(), t.selected))
-                .collect::<Vec<_>>(),
-            self.subtitle_tracks
-                .iter()
-                .map(|t| (t.id, t.label.clone(), t.selected))
-                .collect::<Vec<_>>()
-        );
     }
 
-    /// A dropdown listing the given media tracks (audio or subtitle); returns the id of
-    /// the track the user picked, or `None`. Disabled while there are no tracks, with
-    /// `fallback` shown as the menu label then.
-    fn track_switcher_menu(
-        ui: &mut egui::Ui,
-        icon: MaterialIcon,
-        tracks: &[MediaTrack],
-        fallback: &str,
-    ) -> Option<i64> {
-        let current_label = tracks
-            .iter()
-            .find(|t| t.selected)
-            .map(|t| t.label.clone())
-            .unwrap_or_else(|| fallback.to_string());
-        let tracks = tracks.to_vec();
-        let mut chosen = None;
-        ui.add_enabled_ui(!tracks.is_empty(), |ui| {
-            ui.menu_button(icon_label(ui, icon, &current_label), |ui| {
-                for track in &tracks {
-                    if ui.selectable_label(track.selected, &track.label).clicked() {
-                        chosen = Some(track.id);
-                        ui.close();
-                    }
-                }
-            });
-        });
-        chosen
+    fn current_cache_spans(&mut self) -> Vec<(f64, f64)> {
+        let path = self
+            .fsm
+            .playlist
+            .get(self.fsm.current_index.unwrap_or(0))
+            .cloned();
+        let Some(path) = path else {
+            return Vec::new();
+        };
+        let Some(msg_id) = ammini::telegram::telegram_url_msg_id(&path) else {
+            return Vec::new();
+        };
+        let Some((total_bytes, ranges)) = self
+            .cache_coverage
+            .get(&msg_id)
+            .map(|c| (c.total_bytes, c.ranges.clone()))
+        else {
+            return Vec::new();
+        };
+        let duration = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
+        ammini::telegram::cache::byte_ranges_to_time_spans_mapped(
+            &ranges,
+            total_bytes,
+            duration,
+            &self.byte_time_map,
+        )
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui, events: &mut Vec<PlayerEvent>) {
-        let mut clear_resume = false;
-        ui.horizontal(|ui| {
-            if ui
-                .button(icon_label(ui, ICON_FILE_OPEN, "Open File"))
-                .clicked()
-                && let Some(e) = self.open_file_dialog()
-            {
-                events.push(e);
-            }
-            if ui.button(icon_label(ui, ICON_LINK, "Open URL")).clicked() {
-                self.show_url_dialog = true;
-            }
-            ui.separator();
-            if ui
-                .button(icon_label(ui, ICON_PLAYLIST_PLAY, "Playlist"))
-                .clicked()
-            {
-                events.push(PlayerEvent::TogglePlaylist);
-            }
-            if ui.button(icon_label(ui, ICON_SEND, "Telegram")).clicked() {
-                self.show_telegram = !self.show_telegram;
-            }
-
-            // Audio / subtitle track switchers: disabled until mpv reports any tracks.
-            let chosen_aid =
-                Self::track_switcher_menu(ui, ICON_AUDIOTRACK, &self.audio_tracks, "Audio");
-            let chosen_sid =
-                Self::track_switcher_menu(ui, ICON_SUBTITLES, &self.subtitle_tracks, "Subtitles");
-            if let Some(id) = chosen_aid {
-                // Label for the telemetry event, captured before the mutable borrow
-                // below flips the selection flags.
-                let label = self
-                    .audio_tracks
-                    .iter()
-                    .find(|t| t.id == id)
-                    .map(|t| t.label.clone())
-                    .unwrap_or_else(|| format!("track {id}"));
-                match self.player_mut().mpv().set_property("aid", id) {
-                    Ok(()) => {
-                        for track in &mut self.audio_tracks {
-                            track.selected = track.id == id;
-                        }
-                        ammini::telemetry::emit(TelemetryEvent::AudioTrackChanged {
-                            track_id: id,
-                            label,
-                        });
-                    }
-                    Err(e) => tracing::warn!("failed to switch audio track to {id}: {e}"),
-                }
-            }
-            if let Some(id) = chosen_sid {
-                match self.player_mut().mpv().set_property("sid", id) {
-                    Ok(()) => {
-                        for track in &mut self.subtitle_tracks {
-                            track.selected = track.id == id;
-                        }
-                    }
-                    Err(e) => tracing::warn!("failed to switch subtitle track to {id}: {e}"),
-                }
-            }
-
-            ui.menu_button(icon_label(ui, ICON_HISTORY, "Recent"), |ui| {
-                if self.fsm.persistent.recent_files.is_empty() {
-                    ui.weak("No recent files");
-                } else {
-                    for path in self.fsm.persistent.recent_files.clone() {
-                        if ui.button(truncate_path(&path)).clicked() {
-                            ammini::telemetry::emit(TelemetryEvent::RecentItemSelected {
-                                kind: ammini::telemetry::RecentKind::File,
-                                name: path_basename(&path),
-                            });
-                            events.push(PlayerEvent::OpenFile(path));
-                            ui.close();
-                        }
-                    }
-                    ui.separator();
-                    if ui.button("Clear saved positions").clicked() {
-                        clear_resume = true;
-                    }
-                }
-                if !self.fsm.persistent.recent_telegram.is_empty() {
-                    ui.separator();
-                    ui.weak("Recent Telegram files");
-                    for entry in self.fsm.persistent.recent_telegram.clone() {
-                        let label = format!("{} · {}", entry.chat_name, truncate_path(&entry.name));
-                        if ui.button(icon_label(ui, ICON_PLAY_ARROW, &label)).clicked() {
-                            ammini::telemetry::emit(TelemetryEvent::RecentItemSelected {
-                                kind: ammini::telemetry::RecentKind::Telegram,
-                                name: entry.name.clone(),
-                            });
-                            if let Some(bg) = &self.bg_tx {
-                                let _ = bg.send(BgCommand::PlayTelegramVideo {
-                                    peer: entry.peer,
-                                    msg_id: entry.msg_id,
-                                });
-                            }
-                            ui.close();
-                        }
-                    }
-                }
-            });
-            if clear_resume {
-                // SAFETY: resume positions are plain UI data, not state-machine invariants.
-                unsafe { &mut self.fsm.inner_mut().persistent.resume }.clear();
-            }
-
-            if let Some(update) = self.update.clone()
-                && !self.show_update_dialog
-                && ui
-                    .button(icon_label(ui, ICON_SYSTEM_UPDATE, "Update"))
-                    .on_hover_text(format!("Ammini {} is available", update.latest))
-                    .clicked()
-            {
-                self.show_update_dialog = true;
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add(egui::Label::new(&self.fsm.status).truncate());
-                // `status` is a bare state word ("Loading" / "Playing" / "Paused"), so the
-                // path — a local file or the localhost proxy URL for remote media — is
-                // shown beside it and stays put while playback runs. The full value is
-                // in the hover text for elided entries.
-                if let Some(media) = self.fsm.current_media.clone() {
-                    ui.separator();
-                    let dark = ammini::style::is_dark(ui.ctx());
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(elide_tail(&media, 44))
-                                .color(ammini::style::text_secondary(dark)),
-                        )
-                        .truncate(),
-                    )
-                    .on_hover_text(&media);
-                }
-            });
-        });
+    fn telegram_load_in_progress(&self) -> bool {
+        if !matches!(self.fsm.state(), FsmState::Loading { .. }) {
+            return false;
+        }
+        self.fsm
+            .playlist
+            .get(self.fsm.current_index.unwrap_or(0))
+            .is_some_and(|p| ammini::telegram::telegram_url_msg_id(p).is_some())
     }
 
-    fn playlist_panel(&mut self, ui: &mut egui::Ui, events: &mut Vec<PlayerEvent>) {
-        ui.label("Playlist");
-        ui.separator();
-        egui::ScrollArea::vertical()
-            .id_salt("playlist")
-            .show(ui, |ui| {
-                for (i, path) in self.fsm.playlist.iter().enumerate() {
-                    let selected = self.fsm.current_index == Some(i);
-                    if ui.selectable_label(selected, truncate_path(path)).clicked() {
-                        events.push(PlayerEvent::SelectTrack(i));
-                    }
-                }
-            });
+    fn poll_seek(&mut self) {
+        let pending = self.pending_seek.clone();
+        let Some(mut tracker) = pending.lock().unwrap().take() else {
+            return;
+        };
+        if tracker.elapsed() > ammini::telemetry::SEEK_PENDING_TIMEOUT {
+            return;
+        }
+        if let Ok(Some(position)) = self.player_mut().time_pos()
+            && let Some(ms) = tracker.poll(position)
+        {
+            ammini::telemetry::emit(TelemetryEvent::Metric(Metric::SeekLatencyMs { ms }));
+        }
+    }
+
+    fn update_display_sleep(&mut self) {
+        let playing = !self.player_mut().paused().unwrap_or(true)
+            && matches!(self.player_mut().duration(), Ok(Some(_)));
+        self.display_sleep.set_playing(playing);
     }
 }
 
-impl App for AmminiApp {
+impl App for NewPlayerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
+        self.frame_count += 1;
         let ctx = ui.ctx().clone();
         let mut events = Vec::new();
 
         while let Ok(msg) = self.ui_rx.try_recv() {
-            // Full-message dumps are too noisy: `DialogsPageLoaded`/`MessagesPageLoaded`
-            // carry whole lists and `CacheCoverage` fires once a second. The per-message
-            // counts below keep the loop diagnosable instead.
-            // debug!("telegram ui message: {msg:?}");
             match msg {
                 UiMessage::ProxyReady { port } => {
-                    let url = format!("http://127.0.0.1:{port}");
-                    info!("proxy ready at {url}");
-                    *self.proxy_url_mut() = Some(url);
+                    *self.proxy_url_mut() = Some(format!("http://127.0.0.1:{port}"));
                 }
                 UiMessage::VideoReady { msg_id, url, name } => {
                     info!("telegram: video ready msg_id={msg_id} url={url}");
                     self.telegram_fsm.handle(&TelegramEvent::VideoReady);
                     events.push(PlayerEvent::OpenTelegramUrl(url));
-                    // Remember it in the recent-Telegram list (requires the current chat; the
-                    // peer holds the access hash needed to refetch on replay).
+                    // Hide the chats overlay so the video is visible.
+                    self.chats_open = false;
                     if let Some(peer) = self.telegram_fsm.data.selected_chat {
                         let chat_name = self
                             .telegram_fsm
@@ -863,17 +491,11 @@ impl App for AmminiApp {
                             msg_id,
                             name,
                         };
-                        // SAFETY: recent-Telegram entries are plain UI data, not
-                        // state-machine invariants.
                         let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
                         record_recent_telegram(&mut persistent.recent_telegram, entry);
                     }
                 }
                 UiMessage::VideoError(e) => {
-                    ammini::telemetry::emit(TelemetryEvent::Error {
-                        component: "telegram.video",
-                        message: e.clone(),
-                    });
                     self.telegram_fsm.handle(&TelegramEvent::VideoError(e));
                 }
                 UiMessage::CacheCoverage {
@@ -890,124 +512,940 @@ impl App for AmminiApp {
                     );
                 }
                 other => {
-                    // Central error/telegram-auth reporting: every background error
-                    // funnels through these three messages, so the emit sites stay
-                    // in one place instead of scattered through the bg loop.
-                    if let UiMessage::AuthError(reason) = &other {
-                        ammini::telemetry::emit(TelemetryEvent::TelegramLoginFailed {
-                            reason: reason.clone(),
-                        });
+                    if let UiMessage::AuthError(r) = &other {
+                        let _ = r;
                     }
-                    if let UiMessage::Error(message) = &other {
-                        ammini::telemetry::emit(TelemetryEvent::Error {
-                            component: "telegram",
-                            message: message.clone(),
-                        });
+                    if let UiMessage::Error(m) = &other {
+                        let _ = m;
                     }
-                    if let Some(event) =
-                        ammini::telegram::state_machine::ui_message_to_event(&other)
-                    {
-                        self.telegram_fsm.handle(&event);
+                    if let Some(ev) = ammini::telegram::state_machine::ui_message_to_event(&other) {
+                        self.telegram_fsm.handle(&ev);
                     }
                 }
             }
-            // One line per drained message, so an empty chat list or thread is instantly
-            // diagnosable from the terminal.
-            debug!(
-                "telegram dialogs={} messages={}",
-                self.telegram_fsm.data.dialogs.len(),
-                self.telegram_fsm.data.messages.len(),
-            );
         }
-
         while let Ok(update) = self.update_rx.try_recv() {
-            self.on_update_available(update);
+            self.update = Some(update);
+            self.show_update_dialog = true;
         }
 
         self.handle_dropped_files(&ctx, &mut events);
         self.handle_shortcuts(&ctx, &mut events);
         self.handle_url_dialog(ui, &mut events);
-        self.handle_update_dialog(&ctx);
+        if let Some(p) = self.pending_open_file.take() {
+            events.push(PlayerEvent::OpenFile(p));
+        }
         self.refresh_tracks();
 
-        egui::Panel::top("top_bar").show(ui, |ui| {
-            self.top_bar(ui, &mut events);
-        });
-
-        if self.fsm.show_playlist || self.show_telegram {
-            egui::Panel::left("side_panel")
-                .default_size(280.0)
-                .show(ui, |ui| {
-                    if self.show_telegram {
-                        self.telegram_panel
-                            .ui(ui, &mut self.telegram_fsm, &self.bg_tx);
-                    }
-                    if self.fsm.show_playlist && self.show_telegram {
-                        ui.separator();
-                    }
-                    if self.fsm.show_playlist {
-                        self.playlist_panel(ui, &mut events);
-                    }
-                });
+        // Learn the byte->time map for cache shading (throttled ~1 Hz).
+        let now = std::time::Instant::now();
+        let should_record = self
+            .byte_time_record_last
+            .map(|t| t.elapsed().as_secs_f64() >= 1.0)
+            .unwrap_or(true);
+        if should_record {
+            let t = self.player_mut().time_pos().ok().flatten();
+            let b = self
+                .player_mut()
+                .mpv()
+                .get_property::<i64>("stream-pos")
+                .ok();
+            if let (Some(t), Some(b)) = (t, b) {
+                self.byte_time_map.record(b as u64, t);
+            }
+            self.byte_time_record_last = Some(now);
         }
 
         events.push(PlayerEvent::Poll);
-        for event in events {
-            match event {
-                PlayerEvent::Poll => trace!("dispatching event: {event:?}"),
-                _ => debug!("dispatching event: {event:?}"),
-            }
-            self.fsm.handle(&event);
-        }
-        self.poll_seek();
-        self.update_display_sleep();
 
-        egui::CentralPanel::default().show(ui, |ui| {
-            // Cached byte ranges of the current Telegram video, shaded on the
-            // seekbar lighter than the rail (theme-derived; empty for local files).
+        // Nav rail:
+
+        left_sidebar::show(
+            ui,
+            &ctx,
+            &self.icon_cache,
+            self.nav_rail_open,
+            &mut self.active_tab,
+            &mut self.chats_open,
+            &mut self.show_telegram,
+        );
+
+        // Central viewport with SharkPlayer (HUD disabled; custom HUD below)
+        let (player_response, cache_spans) = {
             let cache_spans = self.current_cache_spans();
             let cache_color = ammini::style::cache_bar_fill(ui.visuals().widgets.inactive.bg_fill);
             let pending = self.pending_seek.clone();
-            let player_response = ui.add(
-                SharkPlayer::new_with_icons(self.player_mut(), PlayerControlIcons)
-                    .seek_callback(Rc::new(move |_forward, target| {
-                        // Arrow keys / J / L / skip buttons — records the seek so the
-                        // next frames' `poll_seek` can time when playback resumes.
-                        *pending.lock().unwrap() = Some(SeekTracker::new(target, _forward));
-                    }))
-                    .cache_overlay(cache_spans, cache_color),
-            );
-            // Focus lands on the widget's internal player surface, not on the
-            // response returned by `Widget::ui` — check that id in `handle_shortcuts`.
+            let r = ui.centered_and_justified(|ui| {
+                ui.add(
+                    SharkPlayer::new(self.player_mut())
+                        .show_hud(false)
+                        .seek_callback(Rc::new(move |_forward, target| {
+                            *pending.lock().unwrap() = Some(SeekTracker::new(target, _forward));
+                        }))
+                        .cache_overlay(cache_spans.clone(), cache_color),
+                )
+            });
             self.video_focus_id = Some(SharkPlayer::player_focus_id(ui));
-
-            // Loading overlay: dim the video and show a spinner while a Telegram
-            // file's initial load is still in progress (painted, not a widget, so
-            // it never steals clicks from the video surface).
-            if self.telegram_load_in_progress() {
-                let video_rect = player_response.rect;
-                let painter = ui.painter().with_clip_rect(video_rect);
-                painter.rect_filled(video_rect, 0.0, egui::Color32::from_black_alpha(70));
-
-                let spinner_size = 40.0;
-                let spinner_rect = egui::Rect::from_center_size(
-                    video_rect.center(),
-                    egui::Vec2::splat(spinner_size),
-                );
-                egui::Spinner::new()
-                    .size(spinner_size)
-                    .paint_at(ui, spinner_rect);
-
-                let font_id = egui::TextStyle::Body.resolve(ui.style());
-                painter.text(
-                    egui::pos2(video_rect.center().x, spinner_rect.max.y + 12.0),
-                    egui::Align2::CENTER_TOP,
-                    "Loading…",
-                    font_id,
-                    ui.visuals().weak_text_color(),
-                );
+            if r.inner.double_clicked() {
+                let is_fs = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fs));
             }
-        });
+            (r, cache_spans)
+        };
+
+        // Loading overlay
+        if self.telegram_load_in_progress() {
+            let video_rect = player_response.inner.rect;
+            let painter = ui.painter().with_clip_rect(video_rect);
+            painter.rect_filled(video_rect, 0.0, egui::Color32::from_black_alpha(70));
+            let spinner_size = 40.0;
+            let spinner_rect =
+                egui::Rect::from_center_size(video_rect.center(), egui::Vec2::splat(spinner_size));
+            egui::Spinner::new()
+                .size(spinner_size)
+                .paint_at(ui, spinner_rect);
+            let font_id = egui::TextStyle::Body.resolve(ui.style());
+            painter.text(
+                egui::pos2(video_rect.center().x, spinner_rect.max.y + 12.0),
+                egui::Align2::CENTER_TOP,
+                "Loading…",
+                font_id,
+                ui.visuals().weak_text_color(),
+            );
+        }
+
+        // In fullscreen the SharkPlayer allocates a zero-size widget and renders into
+        // an overlay, so fall back to the whole content rect for HUD/scrim anchoring.
+        let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+        let video_rect = if is_fullscreen {
+            ctx.content_rect()
+        } else {
+            player_response.inner.rect
+        };
+        let hovered = ctx
+            .pointer_hover_pos()
+            .map(|p| video_rect.contains(p) || p.y < 40.0)
+            .unwrap_or(false);
+        let is_paused = self.player_mut().paused().unwrap_or(true);
+        if hovered {
+            if let Some(pos) = ctx.pointer_hover_pos() {
+                if self.hud_hover.map(|(_, prev)| prev != pos).unwrap_or(true) {
+                    self.hud_hover = Some((std::time::Instant::now(), pos));
+                }
+            }
+        } else {
+            self.hud_hover = None;
+        }
+        let moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_down());
+        if moved {
+            self.last_input = std::time::Instant::now();
+        }
+        let menu_open = self.audio_menu_open || self.subs_menu_open;
+        let hud_on = (!is_paused
+            && self.last_input.elapsed() < std::time::Duration::from_millis(4000))
+            || is_paused
+            || menu_open;
+        let show_hud = hud_on && !self.chats_open && !self.inspector_open;
+        let hud_alpha = ctx.animate_bool_with_time(egui::Id::new("hud"), show_hud, 0.18);
+        if !hud_on {
+            ctx.set_cursor_icon(egui::CursorIcon::None);
+        }
+        if !hud_on {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        // Floating top header (toggles), visible with HUD
+        if show_hud {
+            top_bar::show(
+                &ctx,
+                &mut self.nav_rail_open,
+                &mut self.chats_open,
+                &mut self.inspector_open,
+                hud_alpha,
+            );
+        }
+
+        // Gradient scrim over the bottom 25% of the picture (fades with the HUD).
+        if show_hud || hud_alpha > 0.0 {
+            let scrim_h = video_rect.height() * 0.25;
+            let scrim_rect = egui::Rect::from_min_size(
+                egui::pos2(video_rect.min.x, video_rect.max.y - scrim_h),
+                egui::vec2(video_rect.width(), scrim_h),
+            );
+            let mut mesh = egui::Mesh::default();
+            let top_color = egui::Color32::TRANSPARENT;
+            let bot_color = egui::Color32::from_black_alpha((0xd0 as f32 * hud_alpha) as u8);
+            mesh.colored_vertex(scrim_rect.left_top(), top_color);
+            mesh.colored_vertex(scrim_rect.right_top(), top_color);
+            mesh.colored_vertex(scrim_rect.right_bottom(), bot_color);
+            mesh.colored_vertex(scrim_rect.left_bottom(), bot_color);
+            mesh.add_triangle(0, 1, 2);
+            mesh.add_triangle(0, 2, 3);
+            ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("hud_scrim"),
+            ))
+            .add(egui::Shape::mesh(mesh));
+        }
+
+        if show_hud {
+            let hud_h = 70.0;
+            let hud_bottom_padding = 24.0;
+            // Keep the HUD clear of the (possibly open) left nav rail: indent it
+            // by a small margin and shrink its width so it stays inside the video
+            // rect instead of overlapping the sidebar.
+            let window_rect = ctx.viewport_rect();
+            let (hud_left_margin, hud_w) = if is_fullscreen {
+                let max_w = 720.0;
+                let w = window_rect.width().min(max_w);
+                ((window_rect.width() - w) * 0.5, w)
+            } else {
+                let m = if self.nav_rail_open { 72.0 } else { 8.0 };
+                (m, (window_rect.width() - m).max(1.0))
+            };
+            egui::Area::new("hud".into())
+                .order(egui::Order::Tooltip)
+                .fixed_pos(egui::pos2(
+                    hud_left_margin,
+                    window_rect.max.y - hud_h - hud_bottom_padding,
+                ))
+                .default_size(egui::vec2(hud_w, hud_h))
+                .show(&ctx, |ui| {
+                    ui.set_opacity(hud_alpha);
+                    let vw = hud_w;
+                    ui.set_min_size(egui::vec2(vw, hud_h));
+                    ui.set_max_size(egui::vec2(vw, hud_h));
+                    let local = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(vw, hud_h));
+                    let _ = local;
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                        // controls row
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            let playing = !is_paused;
+                            let play_icon_bytes: &[u8] = if playing {
+                                include_bytes!("../assets/icons/newplayer/pause.svg")
+                            } else {
+                                include_bytes!("../assets/icons/newplayer/play-arrow.svg")
+                            };
+                            if ui
+                                .add(
+                                    egui::Button::image(
+                                        egui::Image::from_bytes("play.svg", play_icon_bytes)
+                                            .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                    )
+                                    .fill(C_RAISED)
+                                    .min_size(egui::vec2(36.0, 36.0)),
+                                )
+                                .clicked()
+                            {
+                                let _ = self.player_mut().toggle_pause();
+                            }
+                            if ui
+                                .add(
+                                    egui::Button::image(
+                                        egui::Image::from_bytes(
+                                            "replay-10.svg",
+                                            include_bytes!(
+                                                "../assets/icons/newplayer/replay-10.svg"
+                                            ),
+                                        )
+                                        .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                    )
+                                    .fill(C_RAISED)
+                                    .min_size(egui::vec2(36.0, 36.0)),
+                                )
+                                .clicked()
+                            {
+                                let _ = self.player_mut().seek_relative(-10.0);
+                            }
+                            if ui
+                                .add(
+                                    egui::Button::image(
+                                        egui::Image::from_bytes(
+                                            "forward-10.svg",
+                                            include_bytes!(
+                                                "../assets/icons/newplayer/forward-10.svg"
+                                            ),
+                                        )
+                                        .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                    )
+                                    .fill(C_RAISED)
+                                    .min_size(egui::vec2(36.0, 36.0)),
+                                )
+                                .clicked()
+                            {
+                                let _ = self.player_mut().seek_relative(10.0);
+                            }
+                            // volume: mute icon + slider that expands on hover
+                            let muted = self.player_mut().volume().unwrap_or(50.0) <= 0.0;
+                            let mute_icon: &[u8] = if muted {
+                                include_bytes!("../assets/icons/newplayer/volume-off.svg")
+                            } else {
+                                include_bytes!("../assets/icons/newplayer/volume-up.svg")
+                            };
+                            if ui
+                                .add(
+                                    egui::Button::image(
+                                        egui::Image::from_bytes("volume.svg", mute_icon)
+                                            .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                    )
+                                    .fill(C_RAISED)
+                                    .min_size(egui::vec2(36.0, 36.0)),
+                                )
+                                .clicked()
+                            {
+                                let _ = self.player_mut().toggle_mute();
+                            }
+                            let (slider_rect, _) = ui
+                                .allocate_exact_size(egui::vec2(110.0, 24.0), egui::Sense::hover());
+                            let slider_hovered = slider_rect
+                                .contains(ctx.pointer_hover_pos().unwrap_or(egui::Pos2::ZERO))
+                                || ui.rect_contains_pointer(slider_rect);
+                            if slider_hovered {
+                                let mut vol = self.player_mut().volume().unwrap_or(50.0) as f32;
+                                if ui
+                                    .put(
+                                        slider_rect,
+                                        egui::Slider::new(&mut vol, 0.0..=100.0).show_value(false),
+                                    )
+                                    .changed()
+                                {
+                                    let _ = self.player_mut().set_volume(vol as f64);
+                                }
+                            }
+                            let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
+                            let dur = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
+                            let pos_s = pos.floor() as i64;
+                            let dur_s = dur.floor() as i64;
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{:02}:{:02} / {:02}:{:02}",
+                                    pos_s / 60,
+                                    pos_s % 60,
+                                    dur_s / 60,
+                                    dur_s % 60
+                                ))
+                                .monospace()
+                                .size(11.0)
+                                .color(C_MUTED),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let is_fullscreen =
+                                        ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+                                    let fs_icon_bytes = if is_fullscreen {
+                                        include_bytes!(
+                                            "../assets/icons/newplayer/fullscreen-exit.svg"
+                                        )
+                                    } else {
+                                        include_bytes!("../assets/icons/newplayer/fullscreen.svg")
+                                    };
+                                    if ui
+                                        .add(
+                                            egui::Button::image(
+                                                egui::Image::from_bytes(
+                                                    "fullscreen.svg",
+                                                    fs_icon_bytes,
+                                                )
+                                                .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                            )
+                                            .fill(C_RAISED)
+                                            .min_size(egui::vec2(36.0, 36.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(
+                                            !is_fullscreen,
+                                        ));
+                                    }
+                                    // Speed menu
+                                    ui.menu_button("1.0x", |ui| {
+                                        for speed in [0.5f64, 0.75, 1.0, 1.25, 1.5, 2.0] {
+                                            if ui
+                                                .selectable_label(false, format!("{speed}x"))
+                                                .clicked()
+                                            {
+                                                let _ = self
+                                                    .player_mut()
+                                                    .mpv()
+                                                    .set_property("speed", speed);
+                                                ui.close();
+                                            }
+                                        }
+                                    });
+                                    // Subtitle track selector
+                                    let sub_label = self
+                                        .subtitle_tracks
+                                        .iter()
+                                        .find(|t| t.selected)
+                                        .map(|t| t.label.clone())
+                                        .unwrap_or_else(|| "Subs".to_string());
+                                    let subs_resp = ui.add(
+                                        egui::Button::image_and_text(
+                                            egui::Image::from_bytes(
+                                                "subtitles.svg",
+                                                include_bytes!(
+                                                    "../assets/icons/newplayer/subtitles.svg"
+                                                ),
+                                            )
+                                            .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                            &sub_label,
+                                        )
+                                        .fill(C_RAISED)
+                                        .min_size(egui::vec2(0.0, 36.0)),
+                                    );
+                                    let subs_btn_rect = subs_resp.rect;
+                                    if subs_resp.clicked() {
+                                        self.subs_menu_open = !self.subs_menu_open;
+                                        self.audio_menu_open = false;
+                                        if self.subs_menu_open {
+                                            self.menu_opened_frame = self.frame_count;
+                                        }
+                                    }
+                                    if self.subs_menu_open {
+                                        egui::Area::new("subs_menu".into())
+                                            .order(egui::Order::Tooltip)
+                                            .pivot(egui::Align2::LEFT_BOTTOM)
+                                            .fixed_pos(egui::pos2(
+                                                subs_btn_rect.left(),
+                                                subs_btn_rect.top() - 4.0,
+                                            ))
+                                            .show(&ctx, |ui| {
+                                                egui::Frame::new()
+                                                    .fill(C_RAISED)
+                                                    .stroke(egui::Stroke::new(1.0, C_BORDER2))
+                                                    .corner_radius(6.0)
+                                                    .inner_margin(egui::Margin::same(6))
+                                                    .show(ui, |ui| {
+                                                        ui.set_min_width(180.0);
+                                                        ui.set_max_height(240.0);
+                                                        egui::ScrollArea::vertical()
+                                                            .max_height(200.0)
+                                                            .show(ui, |ui| {
+                                                                for t in
+                                                                    self.subtitle_tracks.clone()
+                                                                {
+                                                                    let label = if t.selected {
+                                                                        format!("✓ {}", t.label)
+                                                                    } else {
+                                                                        t.label.clone()
+                                                                    };
+                                                                    if ui
+                                                                        .selectable_label(
+                                                                            t.selected, &label,
+                                                                        )
+                                                                        .clicked()
+                                                                    {
+                                                                        if let Ok(()) = self
+                                                                            .player_mut()
+                                                                            .mpv()
+                                                                            .set_property(
+                                                                                "sid", t.id,
+                                                                            )
+                                                                        {
+                                                                            for tr in &mut self
+                                                                                .subtitle_tracks
+                                                                            {
+                                                                                tr.selected =
+                                                                                    tr.id == t.id;
+                                                                            }
+                                                                        }
+                                                                        self.subs_menu_open = false;
+                                                                    }
+                                                                }
+                                                            });
+                                                    });
+                                            });
+                                    }
+                                    // Audio track selector
+                                    let audio_label = self
+                                        .audio_tracks
+                                        .iter()
+                                        .find(|t| t.selected)
+                                        .map(|t| t.label.clone())
+                                        .unwrap_or_else(|| "Audio".to_string());
+                                    let audio_resp = ui.add(
+                                        egui::Button::image_and_text(
+                                            egui::Image::from_bytes(
+                                                "audiotrack.svg",
+                                                include_bytes!(
+                                                    "../assets/icons/newplayer/audiotrack.svg"
+                                                ),
+                                            )
+                                            .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                            &audio_label,
+                                        )
+                                        .fill(C_RAISED)
+                                        .min_size(egui::vec2(0.0, 36.0)),
+                                    );
+                                    let audio_btn_rect = audio_resp.rect;
+                                    if audio_resp.clicked() {
+                                        self.audio_menu_open = !self.audio_menu_open;
+                                        self.subs_menu_open = false;
+                                        if self.audio_menu_open {
+                                            self.menu_opened_frame = self.frame_count;
+                                        }
+                                    }
+                                    if self.audio_menu_open {
+                                        egui::Area::new("audio_menu".into())
+                                            .order(egui::Order::Tooltip)
+                                            .pivot(egui::Align2::LEFT_BOTTOM)
+                                            .fixed_pos(egui::pos2(
+                                                audio_btn_rect.left(),
+                                                audio_btn_rect.top() - 4.0,
+                                            ))
+                                            .show(&ctx, |ui| {
+                                                egui::Frame::new()
+                                                    .fill(C_RAISED)
+                                                    .stroke(egui::Stroke::new(1.0, C_BORDER2))
+                                                    .corner_radius(6.0)
+                                                    .inner_margin(egui::Margin::same(6))
+                                                    .show(ui, |ui| {
+                                                        ui.set_min_width(180.0);
+                                                        for t in self.audio_tracks.clone() {
+                                                            let label = if t.selected {
+                                                                format!("✓ {}", t.label)
+                                                            } else {
+                                                                t.label.clone()
+                                                            };
+                                                            if ui
+                                                                .selectable_label(
+                                                                    t.selected, &label,
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                if let Ok(()) = self
+                                                                    .player_mut()
+                                                                    .mpv()
+                                                                    .set_property("aid", t.id)
+                                                                {
+                                                                    for tr in &mut self.audio_tracks
+                                                                    {
+                                                                        tr.selected = tr.id == t.id;
+                                                                    }
+                                                                }
+                                                                self.audio_menu_open = false;
+                                                            }
+                                                        }
+                                                    });
+                                            });
+                                    }
+                                    ui.add_space(8.0);
+                                },
+                            );
+                            ui.add_space(8.0);
+                        });
+                        // timeline
+                        let tl_w = (vw - 16.0).max(1.0);
+                        let (tl_rect, tl_resp) = ui
+                            .horizontal(|ui| {
+                                ui.add_space(8.0);
+                                ui.allocate_exact_size(
+                                    egui::vec2(tl_w, 18.0),
+                                    egui::Sense::click_and_drag(),
+                                )
+                            })
+                            .inner;
+                        let seek_hovered = tl_resp.hovered();
+                        let rail_h = if seek_hovered { 8.0 } else { 6.0 };
+                        let tl_visual = egui::Rect::from_center_size(
+                            tl_rect.center(),
+                            egui::vec2(tl_rect.width(), rail_h),
+                        );
+                        let painter = ui.painter();
+                        painter.rect_filled(tl_visual, 3.0, C_RAISED);
+                        // buffered
+                        let dur = self
+                            .player_mut()
+                            .duration()
+                            .ok()
+                            .flatten()
+                            .unwrap_or(1.0)
+                            .max(1.0);
+                        // buffered
+                        let cache_col = C_TEXT.gamma_multiply(0.28);
+                        let rail_r = tl_visual.height() * 0.5;
+                        for (s, e) in &cache_spans {
+                            let x0 = tl_visual.min.x
+                                + ((s / dur).clamp(0.0, 1.0) as f32) * tl_visual.width();
+                            let x1 = tl_visual.min.x
+                                + ((e / dur).clamp(0.0, 1.0) as f32) * tl_visual.width();
+                            if x1 - x0 < 0.5 {
+                                continue;
+                            }
+                            let r = egui::Rect::from_min_max(
+                                egui::pos2(x0, tl_visual.min.y),
+                                egui::pos2(x1, tl_visual.max.y),
+                            );
+                            let cr = egui::CornerRadius {
+                                nw: if x0 <= tl_visual.min.x + 0.5 {
+                                    rail_r as u8
+                                } else {
+                                    0
+                                },
+                                sw: if x0 <= tl_visual.min.x + 0.5 {
+                                    rail_r as u8
+                                } else {
+                                    0
+                                },
+                                ne: if x1 >= tl_visual.max.x - 0.5 {
+                                    rail_r as u8
+                                } else {
+                                    0
+                                },
+                                se: if x1 >= tl_visual.max.x - 0.5 {
+                                    rail_r as u8
+                                } else {
+                                    0
+                                },
+                            };
+                            painter.rect_filled(r, cr, cache_col);
+                        }
+                        // played
+                        let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
+                        let played_w = (pos / dur) as f32 * tl_visual.width();
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                tl_visual.min,
+                                egui::vec2(played_w, tl_visual.height()),
+                            ),
+                            3.0,
+                            C_TEXT,
+                        );
+                        if tl_resp.hovered() {
+                            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                            if let Some(p) = ctx.pointer_hover_pos() {
+                                let frac =
+                                    ((p.x - tl_rect.min.x) / tl_rect.width()).clamp(0.0, 1.0);
+                                let t = frac as f64 * dur;
+                                let s = t.floor() as i64;
+                                let label = format!("{:02}:{:02}", s / 60, s % 60);
+                                let font = egui::FontId::monospace(11.0);
+                                ui.painter().text(
+                                    egui::pos2(p.x, tl_rect.min.y - 4.0),
+                                    egui::Align2::CENTER_BOTTOM,
+                                    label,
+                                    font,
+                                    C_TEXT,
+                                );
+                            }
+                        }
+                        if tl_resp.clicked() || tl_resp.dragged() {
+                            if let Some(p) = tl_resp.interact_pointer_pos() {
+                                let frac =
+                                    ((p.x - tl_rect.min.x) / tl_rect.width()).clamp(0.0, 1.0);
+                                let _ = self.player_mut().seek_to(frac as f64 * dur);
+                            }
+                        }
+                        ui.add_space(8.0);
+                    });
+                });
+        }
+
+        // Floating chats overlay (Telegram)
+        if self.chats_open {
+            let x = if self.nav_rail_open { 58.0 } else { 8.0 };
+            let chats_resp = egui::Area::new("chats_overlay".into())
+                .fixed_pos(egui::pos2(x, 0.0))
+                .show(&ctx, |ui| {
+                    egui::Frame::new()
+                        .fill(C_SIDEBAR)
+                        .stroke(egui::Stroke::new(1.0, C_BORDER2))
+                        .corner_radius(0.0)
+                        .inner_margin(egui::Margin {
+                            left: 12,
+                            right: 12,
+                            top: 8,
+                            bottom: 12,
+                        })
+                        .show(ui, |ui| {
+                            ui.set_width(300.0);
+                            ui.set_min_height(ctx.viewport_rect().height() - 8.0);
+                            ui.set_max_height(ctx.viewport_rect().height() - 8.0);
+                            ui.add_space(4.0);
+                            match self.active_tab {
+                                "telegram" => {
+                                    self.telegram_panel
+                                        .ui(ui, &mut self.telegram_fsm, &self.bg_tx);
+                                }
+                                "recent" => {
+                                    ui.label(
+                                        egui::RichText::new("RECENTLY PLAYED")
+                                            .monospace()
+                                            .size(11.0)
+                                            .strong()
+                                            .color(C_DIM),
+                                    );
+                                    ui.add_space(4.0);
+                                    let recent_tg = self.fsm.persistent.recent_telegram.clone();
+                                    if recent_tg.is_empty() {
+                                        ui.label(
+                                            egui::RichText::new("No recent Telegram files")
+                                                .color(C_MUTED),
+                                        );
+                                    } else {
+                                        egui::ScrollArea::vertical().show(ui, |ui| {
+                                            for entry in &recent_tg {
+                                                let (rect, resp) = ui.allocate_exact_size(
+                                                    egui::vec2(ui.available_width(), 52.0),
+                                                    egui::Sense::click(),
+                                                );
+                                                ui.painter().rect_filled(
+                                                    rect,
+                                                    4.0,
+                                                    if resp.hovered() {
+                                                        C_RAISED
+                                                    } else {
+                                                        egui::Color32::TRANSPARENT
+                                                    },
+                                                );
+                                                ui.painter().text(
+                                                    rect.left_top() + egui::vec2(8.0, 6.0),
+                                                    egui::Align2::LEFT_TOP,
+                                                    &entry.chat_name,
+                                                    egui::FontId::proportional(12.0),
+                                                    C_TEXT,
+                                                );
+                                                let name = if entry.name.chars().count() > 46 {
+                                                    format!(
+                                                        "{}…",
+                                                        entry
+                                                            .name
+                                                            .chars()
+                                                            .take(46)
+                                                            .collect::<String>()
+                                                    )
+                                                } else {
+                                                    entry.name.clone()
+                                                };
+                                                ui.painter().text(
+                                                    rect.left_top() + egui::vec2(8.0, 24.0),
+                                                    egui::Align2::LEFT_TOP,
+                                                    &name,
+                                                    egui::FontId::monospace(10.0),
+                                                    C_MUTED,
+                                                );
+                                                if resp.clicked() {
+                                                    if let Some(bg) = &self.bg_tx {
+                                                        let _ =
+                                                            bg.send(BgCommand::PlayTelegramVideo {
+                                                                peer: entry.peer,
+                                                                msg_id: entry.msg_id,
+                                                            });
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                                "library" => {
+                                    ui.label(egui::RichText::new("Media library").color(C_MUTED));
+                                }
+                                "audio" => {
+                                    ui.label(egui::RichText::new("Audio tracks").color(C_MUTED));
+                                    for t in &self.audio_tracks {
+                                        ui.label(egui::RichText::new(&t.label).color(C_TEXT));
+                                    }
+                                }
+                                "subtitles" => {
+                                    ui.label(egui::RichText::new("Subtitle tracks").color(C_MUTED));
+                                    ui.add_space(6.0);
+                                    for t in self.subtitle_tracks.clone() {
+                                        let label = if t.selected {
+                                            format!("✓ {}", t.label)
+                                        } else {
+                                            t.label.clone()
+                                        };
+                                        let (rect, resp) = ui.allocate_exact_size(
+                                            egui::vec2(ui.available_width(), 32.0),
+                                            egui::Sense::click(),
+                                        );
+                                        let hovered = resp.hovered();
+                                        let fill = if t.selected {
+                                            C_RAISED2
+                                        } else if hovered {
+                                            C_ACCENT.linear_multiply(0.15)
+                                        } else {
+                                            egui::Color32::TRANSPARENT
+                                        };
+                                        ui.painter().rect_filled(rect, 6.0, fill);
+                                        ui.painter().text(
+                                            rect.left_center() + egui::vec2(10.0, 0.0),
+                                            egui::Align2::LEFT_CENTER,
+                                            &label,
+                                            egui::FontId::proportional(13.0),
+                                            if t.selected { C_TEXT } else { C_MUTED },
+                                        );
+                                        if resp.hovered() {
+                                            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                                        }
+                                        if resp.clicked() {
+                                            if let Ok(()) =
+                                                self.player_mut().mpv().set_property("sid", t.id)
+                                            {
+                                                for tr in &mut self.subtitle_tracks {
+                                                    tr.selected = tr.id == t.id;
+                                                }
+                                            }
+                                        }
+                                        ui.add_space(4.0);
+                                    }
+                                }
+                                "settings" => {
+                                    ui.label(egui::RichText::new("Settings").color(C_MUTED));
+                                }
+                                _ => {
+                                    ui.label(egui::RichText::new("Select an item").color(C_MUTED));
+                                }
+                            }
+                        });
+                });
+            // Cover the left border so the panel reads as an extension of the nav rail.
+            let frame_rect = chats_resp.response.rect;
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(
+                    frame_rect.min,
+                    egui::pos2(frame_rect.min.x + 2.0, frame_rect.max.y),
+                ),
+                0.0,
+                C_SIDEBAR,
+            );
+            // dismiss on click outside
+            let clicked_outside = ctx.input(|i| i.pointer.any_click())
+                && ctx.input(|i| {
+                    let pos = i.pointer.hover_pos();
+                    let in_overlay = pos
+                        .map(|p| chats_resp.response.rect.contains(p))
+                        .unwrap_or(false);
+                    let in_navrail = pos.map(|p| p.x < 60.0 && p.y >= 40.0).unwrap_or(false);
+                    let in_toolbar = pos
+                        .map(|p| p.y >= video_rect.min.y && p.y < video_rect.min.y + 40.0)
+                        .unwrap_or(false);
+                    !in_overlay && !in_navrail && !in_toolbar
+                });
+            if clicked_outside {
+                self.chats_open = false;
+            }
+        }
+
+        // Floating inspector overlay
+        if self.inspector_open {
+            let proxy_url = self.proxy_url_mut().clone();
+            let pos_line = self
+                .player_mut()
+                .time_pos()
+                .ok()
+                .flatten()
+                .map(|pos| format!("pos: {:.1}s", pos));
+            let info_lines = {
+                let mpv = self.player_mut().mpv();
+                let mut lines: Vec<String> = Vec::new();
+                if let Ok(w) = mpv.get_property::<i64>("width")
+                    && let Ok(h) = mpv.get_property::<i64>("height")
+                {
+                    lines.push(format!("resolution: {}x{}", w, h));
+                }
+                if let Ok(c) = mpv.get_property::<String>("video-codec")
+                    && !c.is_empty()
+                {
+                    lines.push(format!("video codec: {}", c));
+                }
+                if let Ok(c) = mpv.get_property::<String>("audio-codec")
+                    && !c.is_empty()
+                {
+                    lines.push(format!("audio codec: {}", c));
+                }
+                if let Ok(fs) = mpv.get_property::<i64>("file-size")
+                    && fs > 0
+                {
+                    lines.push(format!("file size: {:.1} MB", fs as f64 / 1_048_576.0));
+                }
+                if let Ok(vb) = mpv.get_property::<f64>("video-bitrate")
+                    && vb > 0.0
+                {
+                    lines.push(format!("video bitrate: {:.0} kbps", vb / 1000.0));
+                }
+                if let Ok(ab) = mpv.get_property::<f64>("audio-bitrate")
+                    && ab > 0.0
+                {
+                    lines.push(format!("audio bitrate: {:.0} kbps", ab / 1000.0));
+                }
+                if let Ok(fps) = mpv.get_property::<f64>("container-fps")
+                    && fps > 0.0
+                {
+                    lines.push(format!("fps: {:.2}", fps));
+                }
+                lines
+            };
+            let dismiss = right_sidebar::show(
+                &ctx,
+                proxy_url.as_deref(),
+                pos_line,
+                &info_lines,
+                video_rect.min.y + 40.0,
+                60.0,
+            );
+            if dismiss {
+                self.inspector_open = false;
+            }
+        }
+
+        // URL dialog
+        if self.show_url_dialog {
+            let mut close = false;
+            egui::Window::new("Open URL")
+                .collapsible(false)
+                .resizable(false)
+                .show(&ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("URL:");
+                        ui.text_edit_singleline(&mut self.url_input);
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Load").clicked() && !self.url_input.trim().is_empty() {
+                            events.push(PlayerEvent::OpenUrl(self.url_input.trim().to_string()));
+                            close = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            if close {
+                self.show_url_dialog = false;
+                self.url_input.clear();
+            }
+        }
+
+        for event in events {
+            if matches!(
+                event,
+                PlayerEvent::OpenFile(_)
+                    | PlayerEvent::OpenUrl(_)
+                    | PlayerEvent::OpenTelegramUrl(_)
+            ) {
+                self.byte_time_map = ammini::telegram::cache::ByteTimeMap::default();
+                self.byte_time_record_last = None;
+            }
+            match event {
+                PlayerEvent::Poll => trace!("poll"),
+                _ => debug!("{event:?}"),
+            }
+            self.fsm.handle(&event);
+        }
+        // VideoReady handling from drained messages needs OpenTelegramUrl event; handle via telegram fsm data?
+        // We'll handle OpenTelegramUrl by checking if a video was just readied — skip for now; telegram panel handles play.
+
+        if (self.audio_menu_open || self.subs_menu_open)
+            && self.frame_count > self.menu_opened_frame
+        {
+            if ctx.input(|i| i.pointer.any_click()) {
+                self.audio_menu_open = false;
+                self.subs_menu_open = false;
+            }
+        }
+        self.poll_seek();
+        self.update_display_sleep();
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -1016,15 +1454,9 @@ impl App for AmminiApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         if let Ok(volume) = self.player_mut().volume() {
-            // SAFETY: volume is plain UI data, not a state-machine invariant.
             let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
             persistent.volume = Some(volume);
         }
-        // Record the final playing offset (unthrottled) and pin the current file in the
-        // recent list, so quitting (Cmd+W/Cmd+Q or the close button) leaves a fresh
-        // resume point behind even if playback was paused or switched mid-stream.
-        // SAFETY: `finalize_session` touches only plain UI data (resume map, recent
-        // files) and reads the playback position — no state-machine invariants.
         unsafe { self.fsm.inner_mut().finalize_session() };
         if let Ok(s) = serde_json::to_string(&self.fsm.persistent) {
             storage.set_string(APP_KEY, s);
@@ -1032,107 +1464,36 @@ impl App for AmminiApp {
     }
 }
 
-fn truncate_path(path: &str) -> String {
-    elide_tail(path, 60)
-}
+// helper for active tab state (no field, reuse active_tab? we removed it; use a simple string in struct? add field)
+// We'll add active_tab field via patch below.
 
-/// Shorten `text` to at most `max` chars, keeping the tail behind a `...` marker.
-/// The tail carries the identifying part of a path or URL (the file name, the
-/// `/telegram/{msg_id}` route), so it is what survives elision.
-fn elide_tail(text: &str, max: usize) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() > max {
-        format!(
-            "...{}",
-            chars[chars.len() - (max - 3)..].iter().collect::<String>()
-        )
-    } else {
-        text.to_string()
-    }
-}
-
-/// Base name of a media path, for telemetry — never full paths.
-fn path_basename(path: &str) -> String {
-    path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned()
-}
-
-/// Open a URL in the system browser. Spawning the platform launcher directly
-/// avoids pulling a browser crate (and the `egui-winit` `links` feature, which
-/// isn't enabled) just for the update alert.
-fn open_in_browser(url: &str) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut c = std::process::Command::new("open");
-        c.arg(url);
-        c
-    };
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        // The empty title argument keeps `start` from treating the URL as a window
-        // title when it is quoted.
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", ""]).arg(url);
-        c
-    };
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let mut command = {
-        let mut c = std::process::Command::new("xdg-open");
-        c.arg(url);
-        c
-    };
-    command.spawn().map(|_| ())
-}
-
-fn main() {
+fn main() -> eframe::Result<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("ammini=debug"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
-    info!("starting Ammini");
 
-    let telegram_config = match TelegramConfig::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!(
-                "Failed to load Telegram configuration: {}\n\n\
-                 Copy .env.example to .env and fill in your TELEGRAM_API_ID and \
-                 TELEGRAM_API_HASH from https://my.telegram.org/apps",
-                e
-            );
-            std::process::exit(1);
-        }
-    };
-
-    let (bg_tx, ui_rx) = start(telegram_config);
-
-    // Telemetry — Sentry via the OTLP endpoint (logs/events) plus native metrics
-    // through the sentry SDK. Credentials come from `.env` (SENTRY_DSN /
-    // SENTRY_OTLP_URL); without them telemetry stays disabled. The guard flushes
-    // pending events on exit, after eframe has torn the window down.
     ammini::telemetry::install_panic_hook();
     let _telemetry = ammini::telemetry::start();
     ammini::telemetry::emit(TelemetryEvent::AppStarted {
         version: env!("CARGO_PKG_VERSION").to_string(),
     });
 
-    // Bundled app icon: the blue play squircle, cropped to its edge and resized.
     let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/ammini-icon.png"))
         .expect("assets/ammini-icon.png must be a valid PNG");
 
     let options = NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([960.0, 640.0])
-            .with_icon(icon),
         renderer: eframe::Renderer::Glow,
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1280.0, 800.0])
+            .with_icon(icon),
         ..Default::default()
     };
-
     eframe::run_native(
         "Ammini",
         options,
-        Box::new(move |cc| {
-            let app = AmminiApp::new(cc, Some(bg_tx), ui_rx)?;
-            Ok(Box::new(app) as Box<dyn App>)
+        Box::new(|cc| {
+            let app = NewPlayerApp::new(cc)?;
+            Ok(Box::new(app))
         }),
     )
-    .unwrap();
 }

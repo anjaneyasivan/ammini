@@ -425,20 +425,32 @@ pub async fn next_dialogs_page(
 ) -> Result<(Vec<DialogInfo>, bool)> {
     let mut dialogs = Vec::with_capacity(page_size);
     let mut has_more = true;
+    let mut exhausted = false;
 
-    for _ in 0..page_size {
+    while dialogs.len() < page_size && !exhausted {
         match iter.next().await {
-            Ok(Some(dialog)) => dialogs.push(map_dialog(&dialog)),
+            Ok(Some(dialog)) => {
+                // Skip archived/other folders: only main inbox (folder_id 0/None).
+                if is_archived_dialog(&dialog) {
+                    continue;
+                }
+                dialogs.push(map_dialog(&dialog));
+            }
             Ok(None) => {
+                exhausted = true;
                 has_more = false;
-                break;
             }
             Err(e) => return Err(anyhow::anyhow!("Failed to fetch dialog: {e}")),
         }
     }
 
-    if dialogs.is_empty() {
+    if exhausted {
         has_more = false;
+    }
+
+    if dialogs.is_empty() && !exhausted {
+        // We may have consumed a full page of archived dialogs; assume more.
+        has_more = true;
     }
 
     tracing::debug!(
@@ -492,6 +504,14 @@ pub async fn next_messages_page(
         has_more
     );
     Ok((messages, videos, has_more))
+}
+
+/// Returns true if the dialog lives in a non-main folder (e.g. archived chats, folder_id 1).
+fn is_archived_dialog(dialog: &grammers_client::peer::Dialog) -> bool {
+    match &dialog.raw {
+        grammers_client::tl::enums::Dialog::Dialog(d) => d.folder_id.unwrap_or(0) != 0,
+        grammers_client::tl::enums::Dialog::Folder(_) => true,
+    }
 }
 
 fn map_dialog(dialog: &grammers_client::peer::Dialog) -> DialogInfo {

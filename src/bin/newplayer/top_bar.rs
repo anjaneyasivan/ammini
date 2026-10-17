@@ -13,7 +13,7 @@ pub fn show(
 ) {
     egui::Area::new("top_header".into())
         .order(egui::Order::Tooltip)
-        .fixed_pos(egui::pos2(0.0, 0.0))
+        .fixed_pos(egui::pos2(0.0, 8.0))
         .show(ctx, |ui| {
             ui.set_opacity(alpha);
             ui.set_width(ctx.viewport_rect().width());

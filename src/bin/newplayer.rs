@@ -302,7 +302,7 @@ impl App for App2 {
             egui::Area::new("chats_overlay".into())
                 .fixed_pos(egui::pos2(x, 40.0))
                 .show(&ctx, |ui| {
-                    egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(8.0).show(ui, |ui| {
+                    egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(8.0).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
                         ui.set_width(280.0);
                         ui.set_min_height(ctx.viewport_rect().height() - 44.0);
                         ui.set_max_height(ctx.viewport_rect().height() - 44.0);
@@ -317,7 +317,7 @@ impl App for App2 {
                             for f in ["All", "Movies", "Series"] {
                                 let active = self.active_filter == f;
                                 let fill = if active { C_RAISED2 } else { egui::Color32::TRANSPARENT };
-                                if ui.add(egui::Button::new(f).fill(fill).min_size(egui::vec2(0.0,20.0))).clicked() {
+                                if ui.add(egui::Button::new(f).fill(fill).min_size(egui::vec2(0.0,24.0))).clicked() {
                                     self.active_filter = f;
                                 }
                             }
@@ -359,7 +359,7 @@ impl App for App2 {
             egui::Area::new("inspector_overlay".into())
                 .fixed_pos(egui::pos2(screen.width() - 296.0, 40.0))
                 .show(&ctx, |ui| {
-                    egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(8.0).show(ui, |ui| {
+                    egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(8.0).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
                         ui.set_width(280.0);
                         ui.set_min_height(ctx.viewport_rect().height() - 44.0);
                         ui.set_max_height(ctx.viewport_rect().height() - 44.0);

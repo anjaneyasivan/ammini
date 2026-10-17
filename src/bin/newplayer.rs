@@ -420,6 +420,8 @@ impl App for NewPlayerApp {
                     info!("telegram: video ready msg_id={msg_id} url={url}");
                     self.telegram_fsm.handle(&TelegramEvent::VideoReady);
                     events.push(PlayerEvent::OpenTelegramUrl(url));
+                    // Hide the chats overlay so the video is visible.
+                    self.chats_open = false;
                     if let Some(peer) = self.telegram_fsm.data.selected_chat {
                         let chat_name = self.telegram_fsm.data.selected_chat_name.clone().unwrap_or_else(|| "Chat".to_string());
                         let entry = RecentTelegram { peer, chat_name, msg_id, name };
@@ -486,8 +488,12 @@ impl App for NewPlayerApp {
                         let frame = egui::Frame::new().fill(if active { C_RAISED2 } else { egui::Color32::TRANSPARENT }).stroke(if active { egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33,0x33,0x42)) } else { egui::Stroke::NONE }).inner_margin(egui::Margin::same(8));
                         frame.show(ui, |ui| {
                             if iconify_icon(ui, &self.icon_cache, &ctx, pfx, name, "#ffffff", 20, None) {
-                                self.active_tab = id;
-                                self.chats_open = true;
+                                if self.active_tab == id && self.chats_open {
+                                    self.chats_open = false;
+                                } else {
+                                    self.active_tab = id;
+                                    self.chats_open = true;
+                                }
                                 if id == "telegram" { self.show_telegram = true; }
                             }
                         });

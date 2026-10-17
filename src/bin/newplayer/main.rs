@@ -294,6 +294,10 @@ impl NewPlayerApp {
         if ctx.input(|i| i.key_pressed(egui::Key::T) && i.modifiers.command) {
             self.show_telegram = !self.show_telegram;
         }
+        if ctx.input(|i| i.key_pressed(egui::Key::R) && !i.modifiers.command && !i.modifiers.shift) {
+            self.active_tab = "recent";
+            self.chats_open = true;
+        }
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) && i.modifiers.command) {
             events.push(PlayerEvent::Next);
         }
@@ -581,6 +585,10 @@ impl App for NewPlayerApp {
                 )
             });
             self.video_focus_id = Some(SharkPlayer::player_focus_id(ui));
+            if r.inner.double_clicked() {
+                let is_fs = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fs));
+            }
             (r, cache_spans)
         };
 

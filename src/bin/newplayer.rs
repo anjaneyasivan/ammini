@@ -625,7 +625,13 @@ impl App for NewPlayerApp {
                 });
             });
             // dismiss on click outside
-            let clicked_outside = ctx.input(|i| i.pointer.any_click()) && ctx.input(|i| i.pointer.hover_pos().map(|p| !chats_resp.response.rect.contains(p)).unwrap_or(true));
+            let clicked_outside = ctx.input(|i| i.pointer.any_click()) && ctx.input(|i| {
+                let pos = i.pointer.hover_pos();
+                let in_overlay = pos.map(|p| chats_resp.response.rect.contains(p)).unwrap_or(false);
+                let in_navrail = pos.map(|p| p.x < 60.0 && p.y >= 40.0).unwrap_or(false);
+                let in_toolbar = pos.map(|p| p.y < 40.0).unwrap_or(false);
+                !in_overlay && !in_navrail && !in_toolbar
+            });
             if clicked_outside {
                 self.chats_open = false;
             }
@@ -643,7 +649,13 @@ impl App for NewPlayerApp {
                     if let Ok(pos) = self.player_mut().time_pos() { ui.label(egui::RichText::new(format!("pos: {:.1}s", pos.unwrap_or(0.0))).monospace().size(11.0).color(C_MUTED)); }
                 });
             });
-            let clicked_outside = ctx.input(|i| i.pointer.any_click()) && ctx.input(|i| i.pointer.hover_pos().map(|p| !insp_resp.response.rect.contains(p)).unwrap_or(true));
+            let clicked_outside = ctx.input(|i| i.pointer.any_click()) && ctx.input(|i| {
+                let pos = i.pointer.hover_pos();
+                let in_overlay = pos.map(|p| insp_resp.response.rect.contains(p)).unwrap_or(false);
+                let in_navrail = pos.map(|p| p.x < 60.0 && p.y >= 40.0).unwrap_or(false);
+                let in_toolbar = pos.map(|p| p.y < 40.0).unwrap_or(false);
+                !in_overlay && !in_navrail && !in_toolbar
+            });
             if clicked_outside {
                 self.inspector_open = false;
             }

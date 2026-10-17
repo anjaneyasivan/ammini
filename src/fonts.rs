@@ -210,7 +210,10 @@ pub fn font_definitions() -> egui::FontDefinitions {
     // Proportional: DM Sans is the primary UI face per STYLE.md, with Inter and the
     // emoji/symbol/script fallbacks after it.
     {
-        let list = defs.families.get_mut(&egui::FontFamily::Proportional).unwrap();
+        let list = defs
+            .families
+            .get_mut(&egui::FontFamily::Proportional)
+            .unwrap();
         list.insert(0, "DMSans".to_owned());
         list.insert(1, "Inter".to_owned());
         list.splice(2..2, fallbacks.iter().cloned());

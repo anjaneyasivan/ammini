@@ -416,7 +416,12 @@ impl NewPlayerApp {
             return Vec::new();
         };
         let duration = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
-        ammini::telegram::cache::byte_ranges_to_time_spans_mapped(&ranges, total_bytes, duration, &self.byte_time_map)
+        ammini::telegram::cache::byte_ranges_to_time_spans_mapped(
+            &ranges,
+            total_bytes,
+            duration,
+            &self.byte_time_map,
+        )
     }
 
     fn telegram_load_in_progress(&self) -> bool {
@@ -535,7 +540,11 @@ impl App for NewPlayerApp {
             .unwrap_or(true);
         if should_record {
             let t = self.player_mut().time_pos().ok().flatten();
-            let b = self.player_mut().mpv().get_property::<i64>("stream-pos").ok();
+            let b = self
+                .player_mut()
+                .mpv()
+                .get_property::<i64>("stream-pos")
+                .ok();
             if let (Some(t), Some(b)) = (t, b) {
                 self.byte_time_map.record(b as u64, t);
             }
@@ -663,8 +672,11 @@ impl App for NewPlayerApp {
             mesh.colored_vertex(scrim_rect.left_bottom(), bot_color);
             mesh.add_triangle(0, 1, 2);
             mesh.add_triangle(0, 2, 3);
-            ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("hud_scrim")))
-                .add(egui::Shape::mesh(mesh));
+            ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Tooltip,
+                egui::Id::new("hud_scrim"),
+            ))
+            .add(egui::Shape::mesh(mesh));
         }
 
         if show_hud {
@@ -684,9 +696,10 @@ impl App for NewPlayerApp {
             };
             egui::Area::new("hud".into())
                 .order(egui::Order::Tooltip)
-                .fixed_pos(
-                    egui::pos2(hud_left_margin, window_rect.max.y - hud_h - hud_bottom_padding),
-                )
+                .fixed_pos(egui::pos2(
+                    hud_left_margin,
+                    window_rect.max.y - hud_h - hud_bottom_padding,
+                ))
                 .default_size(egui::vec2(hud_w, hud_h))
                 .show(&ctx, |ui| {
                     ui.set_opacity(hud_alpha);
@@ -707,9 +720,12 @@ impl App for NewPlayerApp {
                             };
                             if ui
                                 .add(
-                                    egui::Button::image(egui::Image::from_bytes("play.svg", play_icon_bytes).fit_to_exact_size(egui::vec2(18.0, 18.0)))
-                                        .fill(C_RAISED)
-                                        .min_size(egui::vec2(36.0, 36.0)),
+                                    egui::Button::image(
+                                        egui::Image::from_bytes("play.svg", play_icon_bytes)
+                                            .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                    )
+                                    .fill(C_RAISED)
+                                    .min_size(egui::vec2(36.0, 36.0)),
                                 )
                                 .clicked()
                             {
@@ -717,9 +733,17 @@ impl App for NewPlayerApp {
                             }
                             if ui
                                 .add(
-                                    egui::Button::image(egui::Image::from_bytes("replay-10.svg", include_bytes!("../../../assets/icons/newplayer/replay-10.svg")).fit_to_exact_size(egui::vec2(18.0, 18.0)))
-                                        .fill(C_RAISED)
-                                        .min_size(egui::vec2(36.0, 36.0)),
+                                    egui::Button::image(
+                                        egui::Image::from_bytes(
+                                            "replay-10.svg",
+                                            include_bytes!(
+                                                "../../../assets/icons/newplayer/replay-10.svg"
+                                            ),
+                                        )
+                                        .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                    )
+                                    .fill(C_RAISED)
+                                    .min_size(egui::vec2(36.0, 36.0)),
                                 )
                                 .clicked()
                             {
@@ -727,9 +751,17 @@ impl App for NewPlayerApp {
                             }
                             if ui
                                 .add(
-                                    egui::Button::image(egui::Image::from_bytes("forward-10.svg", include_bytes!("../../../assets/icons/newplayer/forward-10.svg")).fit_to_exact_size(egui::vec2(18.0, 18.0)))
-                                        .fill(C_RAISED)
-                                        .min_size(egui::vec2(36.0, 36.0)),
+                                    egui::Button::image(
+                                        egui::Image::from_bytes(
+                                            "forward-10.svg",
+                                            include_bytes!(
+                                                "../../../assets/icons/newplayer/forward-10.svg"
+                                            ),
+                                        )
+                                        .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                    )
+                                    .fill(C_RAISED)
+                                    .min_size(egui::vec2(36.0, 36.0)),
                                 )
                                 .clicked()
                             {
@@ -755,8 +787,8 @@ impl App for NewPlayerApp {
                             {
                                 let _ = self.player_mut().toggle_mute();
                             }
-                            let (slider_rect, _) =
-                                ui.allocate_exact_size(egui::vec2(110.0, 24.0), egui::Sense::hover());
+                            let (slider_rect, _) = ui
+                                .allocate_exact_size(egui::vec2(110.0, 24.0), egui::Sense::hover());
                             let slider_hovered = slider_rect
                                 .contains(ctx.pointer_hover_pos().unwrap_or(egui::Pos2::ZERO))
                                 || ui.rect_contains_pointer(slider_rect);
@@ -794,15 +826,25 @@ impl App for NewPlayerApp {
                                     let is_fullscreen =
                                         ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
                                     let fs_icon_bytes = if is_fullscreen {
-                                        include_bytes!("../../../assets/icons/newplayer/fullscreen-exit.svg")
+                                        include_bytes!(
+                                            "../../../assets/icons/newplayer/fullscreen-exit.svg"
+                                        )
                                     } else {
-                                        include_bytes!("../../../assets/icons/newplayer/fullscreen.svg")
+                                        include_bytes!(
+                                            "../../../assets/icons/newplayer/fullscreen.svg"
+                                        )
                                     };
                                     if ui
                                         .add(
-                                            egui::Button::image(egui::Image::from_bytes("fullscreen.svg", fs_icon_bytes).fit_to_exact_size(egui::vec2(18.0, 18.0)))
-                                                .fill(C_RAISED)
-                                                .min_size(egui::vec2(36.0, 36.0)),
+                                            egui::Button::image(
+                                                egui::Image::from_bytes(
+                                                    "fullscreen.svg",
+                                                    fs_icon_bytes,
+                                                )
+                                                .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                            )
+                                            .fill(C_RAISED)
+                                            .min_size(egui::vec2(36.0, 36.0)),
                                         )
                                         .clicked()
                                     {
@@ -813,8 +855,14 @@ impl App for NewPlayerApp {
                                     // Speed menu
                                     ui.menu_button("1.0x", |ui| {
                                         for speed in [0.5f64, 0.75, 1.0, 1.25, 1.5, 2.0] {
-                                            if ui.selectable_label(false, format!("{speed}x")).clicked() {
-                                                let _ = self.player_mut().mpv().set_property("speed", speed);
+                                            if ui
+                                                .selectable_label(false, format!("{speed}x"))
+                                                .clicked()
+                                            {
+                                                let _ = self
+                                                    .player_mut()
+                                                    .mpv()
+                                                    .set_property("speed", speed);
                                                 ui.close();
                                             }
                                         }
@@ -828,8 +876,13 @@ impl App for NewPlayerApp {
                                         .unwrap_or_else(|| "Subs".to_string());
                                     let subs_resp = ui.add(
                                         egui::Button::image_and_text(
-                                            egui::Image::from_bytes("subtitles.svg", include_bytes!("../../../assets/icons/newplayer/subtitles.svg"))
-                                                .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                            egui::Image::from_bytes(
+                                                "subtitles.svg",
+                                                include_bytes!(
+                                                    "../../../assets/icons/newplayer/subtitles.svg"
+                                                ),
+                                            )
+                                            .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                                             &sub_label,
                                         )
                                         .fill(C_RAISED)
@@ -907,8 +960,13 @@ impl App for NewPlayerApp {
                                         .unwrap_or_else(|| "Audio".to_string());
                                     let audio_resp = ui.add(
                                         egui::Button::image_and_text(
-                                            egui::Image::from_bytes("audiotrack.svg", include_bytes!("../../../assets/icons/newplayer/audiotrack.svg"))
-                                                .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                            egui::Image::from_bytes(
+                                                "audiotrack.svg",
+                                                include_bytes!(
+                                                    "../../../assets/icons/newplayer/audiotrack.svg"
+                                                ),
+                                            )
+                                            .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                                             &audio_label,
                                         )
                                         .fill(C_RAISED)
@@ -1002,8 +1060,10 @@ impl App for NewPlayerApp {
                         let cache_col = C_TEXT.gamma_multiply(0.28);
                         let rail_r = tl_visual.height() * 0.5;
                         for (s, e) in &cache_spans {
-                            let x0 = tl_visual.min.x + ((s / dur).clamp(0.0, 1.0) as f32) * tl_visual.width();
-                            let x1 = tl_visual.min.x + ((e / dur).clamp(0.0, 1.0) as f32) * tl_visual.width();
+                            let x0 = tl_visual.min.x
+                                + ((s / dur).clamp(0.0, 1.0) as f32) * tl_visual.width();
+                            let x1 = tl_visual.min.x
+                                + ((e / dur).clamp(0.0, 1.0) as f32) * tl_visual.width();
                             if x1 - x0 < 0.5 {
                                 continue;
                             }
@@ -1012,10 +1072,26 @@ impl App for NewPlayerApp {
                                 egui::pos2(x1, tl_visual.max.y),
                             );
                             let cr = egui::CornerRadius {
-                                nw: if x0 <= tl_visual.min.x + 0.5 { rail_r as u8 } else { 0 },
-                                sw: if x0 <= tl_visual.min.x + 0.5 { rail_r as u8 } else { 0 },
-                                ne: if x1 >= tl_visual.max.x - 0.5 { rail_r as u8 } else { 0 },
-                                se: if x1 >= tl_visual.max.x - 0.5 { rail_r as u8 } else { 0 },
+                                nw: if x0 <= tl_visual.min.x + 0.5 {
+                                    rail_r as u8
+                                } else {
+                                    0
+                                },
+                                sw: if x0 <= tl_visual.min.x + 0.5 {
+                                    rail_r as u8
+                                } else {
+                                    0
+                                },
+                                ne: if x1 >= tl_visual.max.x - 0.5 {
+                                    rail_r as u8
+                                } else {
+                                    0
+                                },
+                                se: if x1 >= tl_visual.max.x - 0.5 {
+                                    rail_r as u8
+                                } else {
+                                    0
+                                },
                             };
                             painter.rect_filled(r, cr, cache_col);
                         }
@@ -1033,7 +1109,8 @@ impl App for NewPlayerApp {
                         if tl_resp.hovered() {
                             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
                             if let Some(p) = ctx.pointer_hover_pos() {
-                                let frac = ((p.x - tl_rect.min.x) / tl_rect.width()).clamp(0.0, 1.0);
+                                let frac =
+                                    ((p.x - tl_rect.min.x) / tl_rect.width()).clamp(0.0, 1.0);
                                 let t = frac as f64 * dur;
                                 let s = t.floor() as i64;
                                 let label = format!("{:02}:{:02}", s / 60, s % 60);
@@ -1197,10 +1274,8 @@ impl App for NewPlayerApp {
                                             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
                                         }
                                         if resp.clicked() {
-                                            if let Ok(()) = self
-                                                .player_mut()
-                                                .mpv()
-                                                .set_property("sid", t.id)
+                                            if let Ok(()) =
+                                                self.player_mut().mpv().set_property("sid", t.id)
                                             {
                                                 for tr in &mut self.subtitle_tracks {
                                                     tr.selected = tr.id == t.id;
@@ -1339,7 +1414,9 @@ impl App for NewPlayerApp {
         for event in events {
             if matches!(
                 event,
-                PlayerEvent::OpenFile(_) | PlayerEvent::OpenUrl(_) | PlayerEvent::OpenTelegramUrl(_)
+                PlayerEvent::OpenFile(_)
+                    | PlayerEvent::OpenUrl(_)
+                    | PlayerEvent::OpenTelegramUrl(_)
             ) {
                 self.byte_time_map = ammini::telegram::cache::ByteTimeMap::default();
                 self.byte_time_record_last = None;

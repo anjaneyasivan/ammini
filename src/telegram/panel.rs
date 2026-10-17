@@ -759,11 +759,7 @@ impl TelegramPanel {
     /// messages. Video attachments render as a media card (size/status, title,
     /// quality chips, original file name). Returns `true` when a play button was
     /// clicked.
-    fn message_bubble(
-        ui: &mut egui::Ui,
-        msg: &MessageInfo,
-        status: VideoStatus,
-    ) -> bool {
+    fn message_bubble(ui: &mut egui::Ui, msg: &MessageInfo, status: VideoStatus) -> bool {
         let is_me = msg.sender_is_self;
         let (fill, text_color) = if is_me {
             (Color32::TRANSPARENT, Color32::WHITE)

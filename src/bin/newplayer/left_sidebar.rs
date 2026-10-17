@@ -32,7 +32,8 @@ pub fn show(
                 ];
                 for (id, pfx, name) in items {
                     let active = *active_tab == id;
-                    let (rect, response) = ui.allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::click());
+                    let (rect, response) =
+                        ui.allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::click());
                     let hovered = response.hovered() || ui.rect_contains_pointer(rect);
                     let fill = if active {
                         C_RAISED2
@@ -47,13 +48,12 @@ pub fn show(
                         egui::Stroke::new(1.0, egui::Color32::TRANSPARENT)
                     };
                     ui.painter().rect_filled(rect, 8.0, fill);
-                    ui.painter().rect_stroke(rect, 8.0, stroke, egui::StrokeKind::Inside);
+                    ui.painter()
+                        .rect_stroke(rect, 8.0, stroke, egui::StrokeKind::Inside);
                     let mut clicked = false;
-                    let mut child = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(rect)
-                            .layout(egui::Layout::centered_and_justified(egui::Direction::TopDown)),
-                    );
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
+                        egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                    ));
                     if iconify_icon(&mut child, icon_cache, ctx, pfx, name, "#ffffff", 20, None) {
                         clicked = true;
                     }

@@ -127,7 +127,12 @@ pub fn byte_ranges_to_time_spans_mapped(
     }
     ranges
         .iter()
-        .map(|&(s, e)| (map.to_time(s, total, duration), map.to_time(e, total, duration)))
+        .map(|&(s, e)| {
+            (
+                map.to_time(s, total, duration),
+                map.to_time(e, total, duration),
+            )
+        })
         .filter(|(s, e)| e - s > duration * 0.002) // drop moov/header probe slivers
         .collect()
 }

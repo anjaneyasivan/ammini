@@ -318,6 +318,7 @@ impl TelegramPanel {
         fsm: &mut StateMachine<TelegramFsm>,
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
+        ui.add_space(8.0);
         // Search input (interactive, with debounce)
         ui.horizontal(|ui| {
             ui.add_space(12.0);
@@ -325,6 +326,7 @@ impl TelegramPanel {
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut q)
                     .hint_text("Search Telegram chats or files...")
+                    .margin(Margin::symmetric(8, 6))
                     .desired_width(ui.available_width() - 12.0),
             );
             if resp.changed() {
@@ -531,7 +533,9 @@ impl TelegramPanel {
         let mut load_older = false;
         let highlight = fsm.data.highlight_message;
         let highlight_active = highlight.is_some() && fsm.data.highlight_until.map(|t| std::time::Instant::now() < t).unwrap_or(false);
-        egui::CentralPanel::no_frame().show(ui, |ui| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.inner_margin(Margin::symmetric(12, 0)))
+            .show(ui, |ui| {
             if fsm.data.messages.is_empty() {
                 Self::empty_state(ui, "No messages", true);
                 return;

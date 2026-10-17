@@ -165,8 +165,8 @@ impl AmminiApp {
                             let popup_h = 110.0_f32;
                             let popup_rect = egui::Rect::from_min_size(
                                 egui::pos2(
-                                    icon_rect.center().x - popup_w * 0.5,
-                                    icon_rect.top() - popup_h - 6.0,
+                                    icon_rect.center().x - popup_w * 0.5 + 8.0,
+                                    icon_rect.top() - popup_h - 6.0 + 12.0,
                                 ),
                                 egui::vec2(popup_w, popup_h),
                             );

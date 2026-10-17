@@ -394,10 +394,12 @@ impl TelegramPanel {
         if fsm.data.dialog_filter.is_empty() {
             unsafe { &mut fsm.inner_mut().data }.dialog_filter = "All".to_string();
         }
-        // Filter pills
-        ui.horizontal(|ui| {
-            ui.add_space(12.0);
-            for f in ["All", "Channels", "Groups", "Directs", "Unread", "Media"] {
+        // Filter pills (horizontally scrollable)
+        ui.add_space(0.0);
+        egui::ScrollArea::horizontal().id_salt("tg_filter_pills").max_width(ui.available_width()).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                for f in ["All", "Channels", "Groups", "Directs", "Unread", "Media"] {
                 let active = fsm.data.dialog_filter == f;
                 let (r, resp) = ui.allocate_exact_size(egui::vec2(0.0, 22.0), Sense::click());
                 // size to text
@@ -412,6 +414,7 @@ impl TelegramPanel {
                 }
                 ui.add_space(4.0);
             }
+            });
         });
         ui.add_space(6.0);
 

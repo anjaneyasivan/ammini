@@ -42,13 +42,13 @@ const MEDIA: &[Media] = &[
 // ---------------------------------------------------------------------------
 // Nav rail items
 // ---------------------------------------------------------------------------
-struct NavItem { id: &'static str, icon: MaterialIcon, label: &'static str }
+struct NavItem { id: &'static str, icon_prefix: &'static str, icon_name: &'static str, label: &'static str }
 const NAV_TOP: &[NavItem] = &[
-    NavItem { id: "library", icon: ICON_MOVIE, label: "Media Library" },
-    NavItem { id: "telegram", icon: ICON_MESSAGE, label: "Telegram Streams" },
-    NavItem { id: "audio", icon: ICON_MUSIC_NOTE, label: "Audio Output" },
-    NavItem { id: "subtitles", icon: ICON_SUBTITLES, label: "Subtitles" },
-    NavItem { id: "recent", icon: ICON_HISTORY, label: "Watch History" },
+    NavItem { id: "library", icon_prefix: "material-symbols-light", icon_name: "movie", label: "Media Library" },
+    NavItem { id: "telegram", icon_prefix: "material-symbols-light", icon_name: "chat", label: "Telegram Streams" },
+    NavItem { id: "audio", icon_prefix: "material-symbols-light", icon_name: "music-note", label: "Audio Output" },
+    NavItem { id: "subtitles", icon_prefix: "material-symbols-light", icon_name: "subtitles", label: "Subtitles" },
+    NavItem { id: "recent", icon_prefix: "material-symbols-light", icon_name: "history", label: "Watch History" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -247,10 +247,17 @@ impl App for NewPlayerApp {
                         let active = self.active_tab == item.id;
                         let fill = if active { C_RAISED2 } else { egui::Color32::TRANSPARENT };
                         let stroke = if active { egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33,0x33,0x42)) } else { egui::Stroke::NONE };
-                        let col = if active { C_TEXT } else { C_DIM };
-                        let btn = ui.add(egui::Button::new(item.icon.rich_text().size(16.0).color(col)).fill(fill).stroke(stroke).min_size(egui::vec2(40.0,40.0)));
-                        if btn.clicked() { self.active_tab = item.id; self.chats_open = true; if item.id == "telegram" { self.show_telegram = true; } }
-                        btn.on_hover_text(item.label);
+                        let _ = (fill, stroke);
+                        let frame = egui::Frame::new().fill(if active { C_RAISED2 } else { egui::Color32::TRANSPARENT }).stroke(if active { egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33,0x33,0x42)) } else { egui::Stroke::NONE }).inner_margin(egui::Margin::same(8));
+                        frame.show(ui, |ui| {
+                            if iconify_icon(ui, &self.icon_cache, &ctx, item.icon_prefix, item.icon_name, "#ffffff", 20) {
+                                self.active_tab = item.id;
+                                self.chats_open = true;
+                                if item.id == "telegram" { self.show_telegram = true; }
+                            }
+                        });
+                        ui.label(egui::RichText::new("").size(1.0));
+                        let _ = item.label;
                         ui.add_space(4.0);
                     }
                     ui.add_space(8.0);

@@ -469,25 +469,6 @@ impl App for NewPlayerApp {
 
         ctx.set_visuals(egui::Visuals::dark());
 
-        egui::Panel::top("toolbar").frame(egui::Frame::new().fill(C_TOOLBAR)).show(ui, |ui| {
-            ui.set_height(36.0);
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(egui::vec2(150.0, 20.0), egui::Sense::hover());
-                ui.painter().rect_filled(r, 4.0, C_RAISED);
-                ui.painter().text(r.left_center() + egui::vec2(6.0,0.0), egui::Align2::LEFT_CENTER, "127.0.0.1:54941", egui::FontId::monospace(10.0), C_MUTED);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    for (id, icon, on) in [("nav", ICON_LAYERS, self.nav_rail_open), ("chat", ICON_MESSAGE, self.chats_open), ("insp", ICON_INFO, self.inspector_open)] {
-                        let fill = if on { C_RAISED2 } else { C_RAISED };
-                        let stroke = if on { egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33,0x33,0x42)) } else { egui::Stroke::new(1.0, C_BORDER2) };
-                        let txt_col = if on { C_TEXT } else { C_DIM };
-                        if ui.add(egui::Button::new(icon.rich_text().size(14.0).color(txt_col)).fill(fill).stroke(stroke).min_size(egui::vec2(24.0,24.0))).clicked() {
-                            match id { "nav" => self.nav_rail_open = !self.nav_rail_open, "chat" => self.chats_open = !self.chats_open, "insp" => self.inspector_open = !self.inspector_open, _ => {} }
-                        }
-                    }
-                });
-            });
-        });
-
         // Nav rail
         if self.nav_rail_open {
             egui::Panel::left("navrail").resizable(false).default_size(56.0).frame(egui::Frame::new().fill(C_RAIL)).show(ui, |ui| {
@@ -559,6 +540,24 @@ impl App for NewPlayerApp {
             self.hud_hover = None;
         }
         let show_hud = (is_paused || self.hud_hover.as_ref().map(|(t, _)| t.elapsed().as_secs_f32() < 3.0).unwrap_or(false) || self.audio_menu_open || self.subs_menu_open) && !self.chats_open && !self.inspector_open;
+        // Floating top header (toggles), visible with HUD
+        if show_hud {
+            egui::Area::new("top_header".into()).fixed_pos(video_rect.min).show(&ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        for (id, icon, on) in [("nav", ICON_LAYERS, self.nav_rail_open), ("chat", ICON_MESSAGE, self.chats_open), ("insp", ICON_INFO, self.inspector_open)] {
+                            let fill = if on { C_RAISED2 } else { C_RAISED };
+                            let stroke = if on { egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33,0x33,0x42)) } else { egui::Stroke::new(1.0, C_BORDER2) };
+                            let txt_col = if on { C_TEXT } else { C_DIM };
+                            if ui.add(egui::Button::new(icon.rich_text().size(14.0).color(txt_col)).fill(fill).stroke(stroke).min_size(egui::vec2(24.0,24.0))).clicked() {
+                                match id { "nav" => self.nav_rail_open = !self.nav_rail_open, "chat" => self.chats_open = !self.chats_open, "insp" => self.inspector_open = !self.inspector_open, _ => {} }
+                            }
+                        }
+                    });
+                });
+            });
+        }
+
         if show_hud {
             let hud_h = 70.0;
             egui::Area::new("hud".into()).fixed_pos(video_rect.min + egui::vec2(0.0, video_rect.height() - hud_h)).show(&ctx, |ui| {
@@ -768,7 +767,7 @@ impl App for NewPlayerApp {
                 let pos = i.pointer.hover_pos();
                 let in_overlay = pos.map(|p| chats_resp.response.rect.contains(p)).unwrap_or(false);
                 let in_navrail = pos.map(|p| p.x < 60.0 && p.y >= 40.0).unwrap_or(false);
-                let in_toolbar = pos.map(|p| p.y < 40.0).unwrap_or(false);
+                let in_toolbar = pos.map(|p| p.y >= video_rect.min.y && p.y < video_rect.min.y + 40.0).unwrap_or(false);
                 !in_overlay && !in_navrail && !in_toolbar
             });
             if clicked_outside {
@@ -785,14 +784,31 @@ impl App for NewPlayerApp {
                     ui.set_min_height(ctx.viewport_rect().height() - 44.0);
                     ui.set_max_height(ctx.viewport_rect().height() - 44.0);
                     ui.label(egui::RichText::new("MEDIA INSPECTOR").monospace().size(11.0).strong().color(C_DIM));
+                    // Port / proxy info
+                    if let Some(url) = self.proxy_url_mut().clone() {
+                        ui.label(egui::RichText::new(format!("proxy: {}", url)).monospace().size(11.0).color(C_MUTED));
+                    }
                     if let Ok(pos) = self.player_mut().time_pos() { ui.label(egui::RichText::new(format!("pos: {:.1}s", pos.unwrap_or(0.0))).monospace().size(11.0).color(C_MUTED)); }
+                    // Video info from mpv
+                    let mpv = self.player_mut().mpv();
+                    let mut info_lines: Vec<String> = Vec::new();
+                    if let Ok(w) = mpv.get_property::<i64>("width") { if let Ok(h) = mpv.get_property::<i64>("height") { info_lines.push(format!("resolution: {}x{}", w, h)); } }
+                    if let Ok(c) = mpv.get_property::<String>("video-codec") { if !c.is_empty() { info_lines.push(format!("video codec: {}", c)); } }
+                    if let Ok(c) = mpv.get_property::<String>("audio-codec") { if !c.is_empty() { info_lines.push(format!("audio codec: {}", c)); } }
+                    if let Ok(fs) = mpv.get_property::<i64>("file-size") { if fs > 0 { info_lines.push(format!("file size: {:.1} MB", fs as f64 / 1_048_576.0)); } }
+                    if let Ok(vb) = mpv.get_property::<f64>("video-bitrate") { if vb > 0.0 { info_lines.push(format!("video bitrate: {:.0} kbps", vb / 1000.0)); } }
+                    if let Ok(ab) = mpv.get_property::<f64>("audio-bitrate") { if ab > 0.0 { info_lines.push(format!("audio bitrate: {:.0} kbps", ab / 1000.0)); } }
+                    if let Ok(fps) = mpv.get_property::<f64>("container-fps") { if fps > 0.0 { info_lines.push(format!("fps: {:.2}", fps)); } }
+                    for line in info_lines {
+                        ui.label(egui::RichText::new(line).monospace().size(11.0).color(C_MUTED));
+                    }
                 });
             });
             let clicked_outside = ctx.input(|i| i.pointer.any_click()) && ctx.input(|i| {
                 let pos = i.pointer.hover_pos();
                 let in_overlay = pos.map(|p| insp_resp.response.rect.contains(p)).unwrap_or(false);
                 let in_navrail = pos.map(|p| p.x < 60.0 && p.y >= 40.0).unwrap_or(false);
-                let in_toolbar = pos.map(|p| p.y < 40.0).unwrap_or(false);
+                let in_toolbar = pos.map(|p| p.y >= video_rect.min.y && p.y < video_rect.min.y + 40.0).unwrap_or(false);
                 !in_overlay && !in_navrail && !in_toolbar
             });
             if clicked_outside {

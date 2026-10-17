@@ -583,35 +583,12 @@ impl App for NewPlayerApp {
                         let dur = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
                         let pos_s = pos.floor() as i64;
                         let dur_s = dur.floor() as i64;
-                        // Audio track selector
-                        let audio_label = self.audio_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Audio".to_string());
-                        let audio_resp = ui.add(egui::Button::new(icon_label(ui, ICON_AUDIOTRACK, &audio_label)).fill(C_RAISED).min_size(egui::vec2(0.0,24.0)));
-                        let audio_btn_rect = audio_resp.rect;
-                        if audio_resp.clicked() {
-                            self.audio_menu_open = !self.audio_menu_open;
-                            self.subs_menu_open = false;
-                            if self.audio_menu_open { self.menu_opened_frame = self.frame_count; }
-                        }
-if ui.rect_contains_pointer(audio_btn_rect) && ctx.input(|i| i.pointer.primary_clicked()) {
-                            self.audio_menu_open = !self.audio_menu_open;
-                            self.subs_menu_open = false;
-                            if self.audio_menu_open { self.menu_opened_frame = self.frame_count; }
-                        }
-                        if self.audio_menu_open {
-                            egui::Area::new("audio_menu".into()).fixed_pos(egui::pos2(audio_btn_rect.left(), audio_btn_rect.bottom() + 4.0)).show(&ctx, |ui| {
-                                egui::Frame::new().fill(C_RAISED).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(6.0).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
-                                    ui.set_min_width(180.0);
-                                    for t in self.audio_tracks.clone() {
-                                        if ui.selectable_label(t.selected, &t.label).clicked() {
-                                            if let Ok(()) = self.player_mut().mpv().set_property("aid", t.id) {
-                                                for tr in &mut self.audio_tracks { tr.selected = tr.id == t.id; }
-                                            }
-                                            self.audio_menu_open = false;
-                                        }
-                                    }
-                                });
-                            });
-                        }
+                        ui.label(egui::RichText::new(format!("{:02}:{:02} / {:02}:{:02}", pos_s / 60, pos_s % 60, dur_s / 60, dur_s % 60)).monospace().size(11.0).color(C_MUTED));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+                            if ui.add(egui::Button::new(if is_fullscreen { ICON_FULLSCREEN_EXIT.rich_text().size(16.0) } else { ICON_FULLSCREEN.rich_text().size(16.0) }).fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+                            }
                         // Subtitle track selector
                         let sub_label = self.subtitle_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Subs".to_string());
                         let subs_resp = ui.add(egui::Button::new(icon_label(ui, ICON_SUBTITLES, &sub_label)).fill(C_RAISED).min_size(egui::vec2(0.0,24.0)));
@@ -639,12 +616,31 @@ if ui.rect_contains_pointer(audio_btn_rect) && ctx.input(|i| i.pointer.primary_c
                                 });
                             });
                         }
-                        ui.label(egui::RichText::new(format!("{:02}:{:02} / {:02}:{:02}", pos_s / 60, pos_s % 60, dur_s / 60, dur_s % 60)).monospace().size(11.0).color(C_MUTED));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
-                            if ui.add(egui::Button::new(if is_fullscreen { ICON_FULLSCREEN_EXIT.rich_text().size(16.0) } else { ICON_FULLSCREEN.rich_text().size(16.0) }).fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
-                            }
+                        // Audio track selector
+                        let audio_label = self.audio_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Audio".to_string());
+                        let audio_resp = ui.add(egui::Button::new(icon_label(ui, ICON_AUDIOTRACK, &audio_label)).fill(C_RAISED).min_size(egui::vec2(0.0,24.0)));
+                        let audio_btn_rect = audio_resp.rect;
+                        if audio_resp.clicked() {
+                            self.audio_menu_open = !self.audio_menu_open;
+                            self.subs_menu_open = false;
+                            if self.audio_menu_open { self.menu_opened_frame = self.frame_count; }
+                        }
+                        if self.audio_menu_open {
+                            egui::Area::new("audio_menu".into()).fixed_pos(egui::pos2(audio_btn_rect.left(), audio_btn_rect.bottom() + 4.0)).show(&ctx, |ui| {
+                                egui::Frame::new().fill(C_RAISED).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(6.0).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+                                    ui.set_min_width(180.0);
+                                    for t in self.audio_tracks.clone() {
+                                        if ui.selectable_label(t.selected, &t.label).clicked() {
+                                            if let Ok(()) = self.player_mut().mpv().set_property("aid", t.id) {
+                                                for tr in &mut self.audio_tracks { tr.selected = tr.id == t.id; }
+                                            }
+                                            self.audio_menu_open = false;
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                            ui.add_space(8.0);
                         });
                         ui.add_space(8.0);
                     });

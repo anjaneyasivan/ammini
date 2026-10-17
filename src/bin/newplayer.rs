@@ -569,7 +569,7 @@ impl App for NewPlayerApp {
                     ui.horizontal(|ui| {
                         ui.add_space(8.0);
                         let playing = !is_paused;
-                        if ui.add(egui::Button::new(if playing { "⏸" } else { "▶" }).fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() {
+                        if ui.add(egui::Button::new(if playing { ICON_PAUSE.rich_text().size(16.0) } else { ICON_PLAY_ARROW.rich_text().size(16.0) }).fill(C_RAISED).min_size(egui::vec2(32.0,28.0))).clicked() {
                             let _ = self.player_mut().toggle_pause();
                         }
                         if ui.add(egui::Button::new("⏮").fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() { let _ = self.player_mut().seek_relative(-10.0); }

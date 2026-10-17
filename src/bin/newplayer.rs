@@ -599,7 +599,7 @@ impl App for NewPlayerApp {
                             if self.subs_menu_open { self.menu_opened_frame = self.frame_count; }
                         }
                         if self.subs_menu_open {
-                            egui::Area::new("subs_menu".into()).fixed_pos(egui::pos2(subs_btn_rect.left(), subs_btn_rect.bottom() + 4.0)).show(&ctx, |ui| {
+                            egui::Area::new("subs_menu".into()).pivot(egui::Align2::LEFT_BOTTOM).fixed_pos(egui::pos2(subs_btn_rect.left(), subs_btn_rect.top() - 4.0)).show(&ctx, |ui| {
                                 egui::Frame::new().fill(C_RAISED).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(6.0).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                                     ui.set_min_width(180.0);
                                     ui.set_max_height(240.0);
@@ -626,7 +626,7 @@ impl App for NewPlayerApp {
                             if self.audio_menu_open { self.menu_opened_frame = self.frame_count; }
                         }
                         if self.audio_menu_open {
-                            egui::Area::new("audio_menu".into()).fixed_pos(egui::pos2(audio_btn_rect.left(), audio_btn_rect.bottom() + 4.0)).show(&ctx, |ui| {
+                            egui::Area::new("audio_menu".into()).pivot(egui::Align2::LEFT_BOTTOM).fixed_pos(egui::pos2(audio_btn_rect.left(), audio_btn_rect.top() - 4.0)).show(&ctx, |ui| {
                                 egui::Frame::new().fill(C_RAISED).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(6.0).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                                     ui.set_min_width(180.0);
                                     for t in self.audio_tracks.clone() {

@@ -601,6 +601,7 @@ impl App for NewPlayerApp {
 
         if show_hud {
             let hud_h = 70.0;
+            let hud_bottom_padding = 10.0;
             // Keep the HUD clear of the (possibly open) left nav rail: indent it
             // by a small margin and shrink its width so it stays inside the video
             // rect instead of overlapping the sidebar.
@@ -608,7 +609,7 @@ impl App for NewPlayerApp {
             let hud_w = (video_rect.width() - hud_left_margin).max(1.0);
             egui::Area::new("hud".into())
                 .fixed_pos(
-                    video_rect.min + egui::vec2(hud_left_margin, video_rect.height() - hud_h),
+                    video_rect.min + egui::vec2(hud_left_margin, video_rect.height() - hud_h - hud_bottom_padding),
                 )
                 .default_size(egui::vec2(hud_w, hud_h))
                 .show(&ctx, |ui| {

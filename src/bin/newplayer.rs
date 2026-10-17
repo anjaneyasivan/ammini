@@ -293,11 +293,12 @@ impl App for App2 {
         if self.chats_open {
             let x = if self.nav_rail_open { 60.0 } else { 8.0 };
             egui::Area::new("chats_overlay".into())
-                .fixed_pos(egui::pos2(x, 44.0))
+                .fixed_pos(egui::pos2(x, 40.0))
                 .show(&ctx, |ui| {
                     egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(8.0).show(ui, |ui| {
                         ui.set_width(280.0);
-                        ui.set_max_height(520.0);
+                        ui.set_min_height(ctx.viewport_rect().height() - 44.0);
+                        ui.set_max_height(ctx.viewport_rect().height() - 44.0);
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new("CHATS & FILES").monospace().size(11.0).strong().color(C_DIM));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -349,11 +350,12 @@ impl App for App2 {
         if self.inspector_open {
             let screen = ctx.viewport_rect();
             egui::Area::new("inspector_overlay".into())
-                .fixed_pos(egui::pos2(screen.width() - 296.0, 44.0))
+                .fixed_pos(egui::pos2(screen.width() - 296.0, 40.0))
                 .show(&ctx, |ui| {
                     egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(8.0).show(ui, |ui| {
                         ui.set_width(280.0);
-                        ui.set_max_height(520.0);
+                        ui.set_min_height(ctx.viewport_rect().height() - 44.0);
+                        ui.set_max_height(ctx.viewport_rect().height() - 44.0);
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new("MEDIA INSPECTOR").monospace().size(11.0).strong().color(C_DIM));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

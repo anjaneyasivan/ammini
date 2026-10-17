@@ -81,6 +81,8 @@ pub struct TelegramData {
     pub search_results: Vec<SearchResult>,
     pub search_loading: bool,
     pub search_target_message: Option<i32>,
+    pub highlight_message: Option<i32>,
+    pub highlight_until: Option<std::time::Instant>,
     pub loading_video: bool,
     pub current_video: Option<i32>,
 }
@@ -358,6 +360,8 @@ impl TelegramFsm {
                     .find(|d| d.peer_ref == *peer)
                     .map(|d| d.name.clone());
                 self.data.search_target_message = Some(*msg_id);
+                self.data.highlight_message = Some(*msg_id);
+                self.data.highlight_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
                 self.data.search_query.clear();
                 self.data.search_results.clear();
                 Transition(TelegramState::message_list())

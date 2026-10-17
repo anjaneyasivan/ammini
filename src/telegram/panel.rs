@@ -529,6 +529,8 @@ impl TelegramPanel {
 
         let mut play_msg: Option<i32> = None;
         let mut load_older = false;
+        let highlight = fsm.data.highlight_message;
+        let highlight_active = highlight.is_some() && fsm.data.highlight_until.map(|t| std::time::Instant::now() < t).unwrap_or(false);
         egui::CentralPanel::no_frame().show(ui, |ui| {
             if fsm.data.messages.is_empty() {
                 Self::empty_state(ui, "No messages", true);
@@ -587,8 +589,14 @@ impl TelegramPanel {
                         } else {
                             VideoStatus::Ready
                         };
+                        let before = ui.min_rect();
                         if Self::message_bubble(ui, msg, dark, status) {
                             play_msg = Some(msg.id);
+                        }
+                        if highlight_active && highlight == Some(msg.id) {
+                            let after = ui.min_rect();
+                            let rect = egui::Rect::from_min_max(before.min, after.max);
+                            ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0x9b, 0x59, 0xb6)), egui::StrokeKind::Outside);
                         }
                         if scroll_target == Some(msg.id) {
                             ui.scroll_to_cursor(Some(Align::Center));
@@ -604,7 +612,20 @@ impl TelegramPanel {
             if just_opened {
                 ui.scroll_to_cursor(Some(Align::BOTTOM));
             }
+            if highlight_active {
+                ui.ctx().request_repaint();
+            }
         });
+
+        if let Some(until) = fsm.data.highlight_until {
+            if std::time::Instant::now() >= until {
+                unsafe { &mut fsm.inner_mut().data }.highlight_message = None;
+                unsafe { &mut fsm.inner_mut().data }.highlight_until = None;
+            }
+        }
+        if fsm.data.search_target_message.is_some() {
+            unsafe { &mut fsm.inner_mut().data }.search_target_message = None;
+        }
 
         if back {
             fsm.handle(&TelegramEvent::BackToChatList);

@@ -556,6 +556,20 @@ impl App for NewPlayerApp {
             self.hud_hover = None;
         }
         let show_hud = (is_paused || self.hud_hover.as_ref().map(|(t, _)| t.elapsed().as_secs_f32() < 3.0).unwrap_or(false) || self.audio_menu_open || self.subs_menu_open) && !self.chats_open && !self.inspector_open;
+        if !show_hud && !is_paused { ctx.set_cursor_icon(egui::CursorIcon::None); }
+
+        // Faint bottom gradient for readability
+        if show_hud {
+            let grad_rect = egui::Rect::from_min_max(egui::pos2(video_rect.min.x, video_rect.max.y - 120.0), video_rect.max);
+            let painter = ui.painter();
+            for i in 0..8 {
+                let t = i as f32 / 8.0;
+                let alpha = (t * t * 160.0) as u8;
+                let y0 = grad_rect.min.y + t * grad_rect.height();
+                let y1 = grad_rect.min.y + (t + 1.0/8.0) * grad_rect.height();
+                painter.rect_filled(egui::Rect::from_min_max(egui::pos2(grad_rect.min.x, y0), egui::pos2(grad_rect.max.x, y1)), 0.0, egui::Color32::from_black_alpha(alpha));
+            }
+        }
         if show_hud {
             let hud_h = 70.0;
             egui::Area::new("hud".into()).fixed_pos(video_rect.min + egui::vec2(0.0, video_rect.height() - hud_h)).show(&ctx, |ui| {

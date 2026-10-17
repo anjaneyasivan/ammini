@@ -109,7 +109,7 @@ impl IconCache {
 }
 
 fn iconify_icon(ui: &mut egui::Ui, cache: &Arc<Mutex<IconCache>>, ctx: &egui::Context,
-               prefix: &str, name: &str, color: &str, size: u32) -> bool {
+               prefix: &str, name: &str, color: &str, size: u32, bg: Option<egui::Color32>) -> bool {
     let state = { let mut c = cache.lock().unwrap(); c.state(ctx, prefix, name, color, size) };
     let desired = egui::vec2(size as f32, size as f32);
     let mut clicked = false;
@@ -117,7 +117,9 @@ fn iconify_icon(ui: &mut egui::Ui, cache: &Arc<Mutex<IconCache>>, ctx: &egui::Co
         IconState::Ready(bytes) => {
             let image = egui::Image::from_bytes(format!("{prefix}_{name}.svg"), bytes)
                 .max_size(desired).fit_to_original_size(1.0);
-            let btn = ui.add(egui::Button::image(image).frame(false).min_size(desired + egui::vec2(8.0,8.0)));
+            let mut btn = egui::Button::image(image).min_size(desired + egui::vec2(8.0,8.0));
+            if let Some(b) = bg { btn = btn.fill(b).corner_radius(egui::CornerRadius::same(100)); } else { btn = btn.frame(false); }
+            let btn = ui.add(btn);
             clicked = btn.clicked();
         }
         IconState::Failed(_) => {
@@ -250,7 +252,7 @@ impl App for NewPlayerApp {
                         let _ = (fill, stroke);
                         let frame = egui::Frame::new().fill(if active { C_RAISED2 } else { egui::Color32::TRANSPARENT }).stroke(if active { egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33,0x33,0x42)) } else { egui::Stroke::NONE }).inner_margin(egui::Margin::same(8));
                         frame.show(ui, |ui| {
-                            if iconify_icon(ui, &self.icon_cache, &ctx, item.icon_prefix, item.icon_name, "#ffffff", 20) {
+                            if iconify_icon(ui, &self.icon_cache, &ctx, item.icon_prefix, item.icon_name, "#ffffff", 20, None) {
                                 self.active_tab = item.id;
                                 self.chats_open = true;
                                 if item.id == "telegram" { self.show_telegram = true; }
@@ -285,7 +287,9 @@ impl App for NewPlayerApp {
                 format!("▶  {} — {}", m.title, m.subtitle),
                 egui::FontId::proportional(20.0), C_MUTED);
             ui.add_space(4.0);
-            let _ = iconify_icon(ui, &self.icon_cache, &ctx, "material-symbols-light", "play-arrow", "#ffffff", 24);
+            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                let _ = iconify_icon(ui, &self.icon_cache, &ctx, "material-symbols-light", "play-arrow", "#ffffff", 32, Some(egui::Color32::BLACK));
+            });
         });
 
         // Floating chats overlay (Telegram)

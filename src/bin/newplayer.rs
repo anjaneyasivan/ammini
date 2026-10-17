@@ -538,9 +538,13 @@ impl App for NewPlayerApp {
         let is_paused = self.player_mut().paused().unwrap_or(true);
         let show_hud = hovered || is_paused;
         if show_hud {
-            egui::Area::new("hud".into()).fixed_pos(video_rect.min).show(&ctx, |ui| {
-                ui.set_min_size(video_rect.size());
-                ui.set_max_size(video_rect.size());
+            let hud_h = 70.0;
+            egui::Area::new("hud".into()).fixed_pos(video_rect.min + egui::vec2(0.0, video_rect.height() - hud_h)).show(&ctx, |ui| {
+                ui.set_min_size(egui::vec2(video_rect.width(), hud_h));
+                ui.set_max_size(egui::vec2(video_rect.width(), hud_h));
+                let local = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(video_rect.width(), hud_h));
+                let bg = ui.painter().rect_filled(local, 0.0, egui::Color32::from_black_alpha(180));
+                let _ = bg;
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     // controls row
                     ui.horizontal(|ui| {

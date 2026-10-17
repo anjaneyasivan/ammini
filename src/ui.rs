@@ -143,10 +143,6 @@ impl App for AmminiApp {
                 )
             });
             self.video_focus_id = Some(SharkPlayer::player_focus_id(ui));
-            if r.inner.double_clicked() {
-                let is_fs = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fs));
-            }
             (r, cache_spans)
         };
 
@@ -179,16 +175,32 @@ impl App for AmminiApp {
         } else {
             player_response.inner.rect
         };
-        // Double-click on the video (fullscreen): toggle fullscreen. The player
-        // widget itself is zero-sized in fullscreen, so handle it here.
-        if is_fullscreen {
-            let resp = ui.interact(
-                video_rect,
-                egui::Id::new("video_double_click_fs"),
-                egui::Sense::click(),
-            );
-            if resp.double_clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        // Double-click on the video toggles fullscreen. Read from raw pointer input so it
+        // works windowed and fullscreen regardless of which layer the player draws on.
+        if ctx.input(|i| {
+            i.pointer
+                .button_double_clicked(egui::PointerButton::Primary)
+        }) {
+            if let Some(pos) = ctx.pointer_interact_pos() {
+                const UI_LAYERS: [&str; 10] = [
+                    "hud",
+                    "top_header",
+                    "volume_popup",
+                    "speed_menu",
+                    "subs_menu",
+                    "audio_menu",
+                    "settings_menu",
+                    "chats_overlay",
+                    "inspector_overlay",
+                    "hud_scrim",
+                ];
+                let over_ui = ctx
+                    .layer_id_at(pos)
+                    .is_some_and(|l| UI_LAYERS.iter().any(|n| l.id == egui::Id::new(*n)));
+                let in_video = video_rect.contains(pos) && pos.y >= 40.0;
+                if in_video && !over_ui && !self.show_url_dialog {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+                }
             }
         }
         let hovered = ctx

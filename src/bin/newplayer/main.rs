@@ -84,6 +84,7 @@ struct NewPlayerApp {
     inspector_open: bool,
     icon_cache: Arc<Mutex<IconCache>>,
     hud_hover: Option<(std::time::Instant, egui::Pos2)>,
+    last_input: std::time::Instant,
     audio_menu_open: bool,
     subs_menu_open: bool,
     frame_count: u64,
@@ -186,6 +187,7 @@ impl NewPlayerApp {
             inspector_open: true,
             icon_cache: IconCache::new_shared(),
             hud_hover: None,
+            last_input: std::time::Instant::now(),
             audio_menu_open: false,
             subs_menu_open: false,
             frame_count: 0,
@@ -590,16 +592,24 @@ impl App for NewPlayerApp {
         } else {
             self.hud_hover = None;
         }
-        let show_hud = (is_paused
-            || self
-                .hud_hover
-                .as_ref()
-                .map(|(t, _)| t.elapsed().as_secs_f32() < 3.0)
-                .unwrap_or(false)
-            || self.audio_menu_open
-            || self.subs_menu_open)
-            && !self.chats_open
-            && !self.inspector_open;
+        let moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_down());
+        if moved || hovered {
+            self.last_input = std::time::Instant::now();
+        }
+        let menu_open = self.audio_menu_open || self.subs_menu_open;
+        let hud_on = (!is_paused
+            && self.last_input.elapsed() < std::time::Duration::from_millis(2800))
+            || is_paused
+            || menu_open
+            || hovered;
+        let show_hud = hud_on && !self.chats_open && !self.inspector_open;
+        let hud_alpha = ctx.animate_bool_with_time(egui::Id::new("hud"), show_hud, 0.18);
+        if !hud_on {
+            ctx.set_cursor_icon(egui::CursorIcon::None);
+        }
+        if !hud_on {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
         // Floating top header (toggles), visible with HUD
         if show_hud {
             top_bar::show(
@@ -607,6 +617,7 @@ impl App for NewPlayerApp {
                 &mut self.nav_rail_open,
                 &mut self.chats_open,
                 &mut self.inspector_open,
+                hud_alpha,
             );
         }
 
@@ -624,6 +635,7 @@ impl App for NewPlayerApp {
                 )
                 .default_size(egui::vec2(hud_w, hud_h))
                 .show(&ctx, |ui| {
+                    ui.set_opacity(hud_alpha);
                     let vw = hud_w;
                     ui.set_min_size(egui::vec2(vw, hud_h));
                     ui.set_max_size(egui::vec2(vw, hud_h));

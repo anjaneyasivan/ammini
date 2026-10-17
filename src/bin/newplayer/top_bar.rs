@@ -9,10 +9,12 @@ pub fn show(
     nav_rail_open: &mut bool,
     chats_open: &mut bool,
     inspector_open: &mut bool,
+    alpha: f32,
 ) {
     egui::Area::new("top_header".into())
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
+            ui.set_opacity(alpha);
             ui.set_width(ctx.viewport_rect().width());
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

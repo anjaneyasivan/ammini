@@ -410,13 +410,6 @@ impl TelegramPanel {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
-                    // HardDrive icon placeholder
-                    ui.label(
-                        RichText::new("Local Cache: 12.4 GB")
-                            .monospace()
-                            .size(10.0)
-                            .color(C_MUTED),
-                    );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(12.0);
                         if Self::ghost_button(ui, ICON_LOGOUT, "Sign out").clicked() {

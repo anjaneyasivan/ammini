@@ -1,13 +1,15 @@
 //! Left navigation rail (independent component).
+use crate::iconify::{IconCache, iconify_icon};
 use crate::theme::{C_RAIL, C_RAISED2};
 use eframe::egui;
-use egui_material_icons::icons::{ICON_CHAT, ICON_HISTORY, ICON_SUBTITLES};
+use std::sync::{Arc, Mutex};
 
 /// Renders the left nav rail into `ui` when `open` is true. Updates the active tab
 /// and panel visibility flags in place.
 pub fn show(
     ui: &mut egui::Ui,
-    _ctx: &egui::Context,
+    ctx: &egui::Context,
+    icon_cache: &Arc<Mutex<IconCache>>,
     open: bool,
     active_tab: &mut &'static str,
     chats_open: &mut bool,
@@ -24,11 +26,11 @@ pub fn show(
             ui.set_width(56.0);
             ui.vertical_centered(|ui| {
                 let items = [
-                    ("telegram", ICON_CHAT, "Telegram"),
-                    ("subtitles", ICON_SUBTITLES, "Subtitles"),
-                    ("recent", ICON_HISTORY, "Recent"),
+                    ("telegram", "cib", "telegram-plane"),
+                    ("subtitles", "material-symbols-light", "subtitles"),
+                    ("recent", "material-symbols-light", "history"),
                 ];
-                for (id, icon, _label) in items {
+                for (id, pfx, name) in items {
                     let active = *active_tab == id;
                     let frame = egui::Frame::new()
                         .fill(if active {
@@ -43,12 +45,7 @@ pub fn show(
                         })
                         .inner_margin(egui::Margin::same(8));
                     frame.show(ui, |ui| {
-                        let btn = ui.add(
-                            egui::Button::new(icon.rich_text().size(20.0))
-                                .frame(false)
-                                .fill(egui::Color32::TRANSPARENT),
-                        );
-                        if btn.clicked() {
+                        if iconify_icon(ui, icon_cache, ctx, pfx, name, "#ffffff", 20, None) {
                             if *active_tab == id && *chats_open {
                                 *chats_open = false;
                             } else {

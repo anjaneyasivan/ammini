@@ -17,16 +17,18 @@ use statig::blocking::StateMachine;
 use statig::prelude::*;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, info, trace};
 
+mod iconify;
 mod left_sidebar;
 mod right_sidebar;
 mod theme;
 mod top_bar;
 
 use crate::theme::*;
+use iconify::IconCache;
 
 const APP_KEY: &str = "min_mpv_state";
 const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
@@ -125,6 +127,7 @@ struct NewPlayerApp {
     nav_rail_open: bool,
     chats_open: bool,
     inspector_open: bool,
+    icon_cache: Arc<Mutex<IconCache>>,
     hud_hover: Option<(std::time::Instant, egui::Pos2)>,
     audio_menu_open: bool,
     subs_menu_open: bool,
@@ -215,6 +218,7 @@ impl NewPlayerApp {
             nav_rail_open: true,
             chats_open: true,
             inspector_open: true,
+            icon_cache: IconCache::new_shared(),
             hud_hover: None,
             audio_menu_open: false,
             subs_menu_open: false,
@@ -559,6 +563,7 @@ impl App for NewPlayerApp {
         left_sidebar::show(
             ui,
             &ctx,
+            &self.icon_cache,
             self.nav_rail_open,
             &mut self.active_tab,
             &mut self.chats_open,
@@ -678,7 +683,7 @@ impl App for NewPlayerApp {
                             }
                             if ui
                                 .add(
-                                    egui::Button::new(ICON_REPLAY_10.rich_text().size(16.0))
+                                    egui::Button::new("⏮")
                                         .fill(C_RAISED)
                                         .min_size(egui::vec2(28.0, 28.0)),
                                 )
@@ -688,7 +693,7 @@ impl App for NewPlayerApp {
                             }
                             if ui
                                 .add(
-                                    egui::Button::new(ICON_FORWARD_10.rich_text().size(16.0))
+                                    egui::Button::new("⏭")
                                         .fill(C_RAISED)
                                         .min_size(egui::vec2(28.0, 28.0)),
                                 )
@@ -1223,13 +1228,9 @@ impl App for NewPlayerApp {
 // We'll add active_tab field via patch below.
 
 fn main() -> eframe::Result<()> {
-    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/ammini-icon.png"))
-        .expect("assets/ammini-icon.png must be a valid PNG");
     let options = NativeOptions {
         renderer: eframe::Renderer::Glow,
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 800.0])
-            .with_icon(icon),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]),
         ..Default::default()
     };
     eframe::run_native(

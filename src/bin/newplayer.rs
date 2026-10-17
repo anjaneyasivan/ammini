@@ -231,7 +231,7 @@ impl App for NewPlayerApp {
                         }
                     }
                     ui.add_space(6.0);
-                    if ui.add(egui::Button::new("Open URL").fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() { self.show_telegram = !self.show_telegram; }
+                    if ui.add(egui::Button::new("Open URL").fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() { self.show_telegram = true; self.chats_open = true; self.active_tab = "telegram"; }
                     if ui.add(egui::Button::new("Open File").fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() {}
                 });
             });
@@ -249,7 +249,7 @@ impl App for NewPlayerApp {
                         let stroke = if active { egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33,0x33,0x42)) } else { egui::Stroke::NONE };
                         let col = if active { C_TEXT } else { C_DIM };
                         let btn = ui.add(egui::Button::new(item.icon.rich_text().size(16.0).color(col)).fill(fill).stroke(stroke).min_size(egui::vec2(40.0,40.0)));
-                        if btn.clicked() { self.active_tab = item.id; if item.id == "telegram" { self.show_telegram = true; } }
+                        if btn.clicked() { self.active_tab = item.id; self.chats_open = true; if item.id == "telegram" { self.show_telegram = true; } }
                         btn.on_hover_text(item.label);
                         ui.add_space(4.0);
                     }
@@ -289,16 +289,45 @@ impl App for NewPlayerApp {
                     ui.set_width(300.0);
                     ui.set_min_height(ctx.viewport_rect().height() - 44.0);
                     ui.set_max_height(ctx.viewport_rect().height() - 44.0);
+                    let title = match self.active_tab {
+                        "telegram" => "TELEGRAM",
+                        "library" => "LIBRARY",
+                        "audio" => "AUDIO TRACKS",
+                        "subtitles" => "SUBTITLES",
+                        "recent" => "RECENT",
+                        "settings" => "SETTINGS",
+                        _ => "PANEL",
+                    };
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("TELEGRAM").monospace().size(11.0).strong().color(C_DIM));
+                        ui.label(egui::RichText::new(title).monospace().size(11.0).strong().color(C_DIM));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.small_button("✕").clicked() { self.chats_open = false; }
                         });
                     });
-                    if self.show_telegram {
-                        self.telegram_panel.ui(ui, &mut self.telegram_fsm, &self.bg_tx);
-                    } else {
-                        ui.label(egui::RichText::new("Press 'Open URL' or click Telegram icon to start").color(C_MUTED));
+                    match self.active_tab {
+                        "telegram" => {
+                            if self.show_telegram {
+                                self.telegram_panel.ui(ui, &mut self.telegram_fsm, &self.bg_tx);
+                            } else {
+                                ui.label(egui::RichText::new("Click Telegram icon or 'Open URL' to start").color(C_MUTED));
+                                if ui.button("Open URL").clicked() { self.show_telegram = true; }
+                            }
+                        }
+                        "audio" => {
+                            ui.label(egui::RichText::new("Audio tracks").color(C_MUTED));
+                        }
+                        "subtitles" => {
+                            ui.label(egui::RichText::new("Subtitle tracks").color(C_MUTED));
+                        }
+                        "recent" => {
+                            ui.label(egui::RichText::new("Recent media").color(C_MUTED));
+                        }
+                        "settings" => {
+                            ui.label(egui::RichText::new("Settings").color(C_MUTED));
+                        }
+                        _ => {
+                            ui.label(egui::RichText::new("Media library").color(C_MUTED));
+                        }
                     }
                 });
             });

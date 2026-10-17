@@ -72,19 +72,21 @@ pub fn show(
                     ui.add_space(4.0);
                 }
             });
-            ui.add_space(ui.available_height().max(0.0));
-            if iconify_icon(
-                ui,
-                icon_cache,
-                ctx,
-                "material-symbols",
-                "settings",
-                "#ffffff",
-                20,
-                None,
-            ) {
-                *settings_menu_open = !*settings_menu_open;
-            }
-            ui.add_space(8.0);
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                if iconify_icon(
+                    ui,
+                    icon_cache,
+                    ctx,
+                    "material-symbols",
+                    "settings",
+                    "#ffffff",
+                    20,
+                    None,
+                ) {
+                    *settings_menu_open = !*settings_menu_open;
+                }
+                ui.add_space(8.0);
+            });
         });
 }

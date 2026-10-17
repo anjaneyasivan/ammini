@@ -13,8 +13,7 @@ pub fn show(
     egui::Area::new("top_header".into())
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
-            ui.set_min_width(ctx.viewport_rect().width());
-            ui.set_max_width(ctx.viewport_rect().width());
+            ui.set_width(ctx.viewport_rect().width());
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(12.0);

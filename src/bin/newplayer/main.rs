@@ -954,9 +954,11 @@ impl App for NewPlayerApp {
                                 )
                             })
                             .inner;
+                        let seek_hovered = tl_resp.hovered();
+                        let rail_h = if seek_hovered { 8.0 } else { 6.0 };
                         let tl_visual = egui::Rect::from_center_size(
                             tl_rect.center(),
-                            egui::vec2(tl_rect.width(), 6.0),
+                            egui::vec2(tl_rect.width(), rail_h),
                         );
                         let painter = ui.painter();
                         painter.rect_filled(tl_visual, 3.0, C_RAISED);
@@ -993,6 +995,20 @@ impl App for NewPlayerApp {
                         );
                         if tl_resp.hovered() {
                             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                            if let Some(p) = ctx.pointer_hover_pos() {
+                                let frac = ((p.x - tl_rect.min.x) / tl_rect.width()).clamp(0.0, 1.0);
+                                let t = frac as f64 * dur;
+                                let s = t.floor() as i64;
+                                let label = format!("{:02}:{:02}", s / 60, s % 60);
+                                let font = egui::FontId::monospace(11.0);
+                                ui.painter().text(
+                                    egui::pos2(p.x, tl_rect.min.y - 4.0),
+                                    egui::Align2::CENTER_BOTTOM,
+                                    label,
+                                    font,
+                                    C_TEXT,
+                                );
+                            }
                         }
                         if tl_resp.clicked() || tl_resp.dragged() {
                             if let Some(p) = tl_resp.interact_pointer_pos() {

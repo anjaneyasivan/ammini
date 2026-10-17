@@ -543,19 +543,7 @@ impl App for NewPlayerApp {
             let cache_spans = self.current_cache_spans();
             let cache_color = ammini::style::cache_bar_fill(ui.visuals().widgets.inactive.bg_fill);
             let pending = self.pending_seek.clone();
-            // Center the video vertically, accounting for the overlaid bottom HUD so the
-            // letterbox bars look balanced (STYLE.md: equal bars around the picture).
-            let aspect = self.player_mut().aspect_ratio().ok().flatten().unwrap_or(16.0 / 9.0) as f32;
-            let avail = ui.available_size();
-            let (_vw, vh) = if avail.x / avail.y > aspect {
-                (avail.y * aspect, avail.y)
-            } else {
-                (avail.x, avail.x / aspect)
-            };
-            let hud_h = 70.0;
-            let top_offset = ((avail.y - vh) / 2.0 - hud_h).max(0.0);
-            ui.add_space(top_offset);
-            let r = ui.vertical_centered(|ui| {
+            let r = ui.centered_and_justified(|ui| {
                 ui.add(
                     SharkPlayer::new(self.player_mut())
                         .show_hud(false)
@@ -564,15 +552,14 @@ impl App for NewPlayerApp {
                         }))
                         .cache_overlay(cache_spans.clone(), cache_color),
                 )
-            })
-            .inner;
+            });
             self.video_focus_id = Some(SharkPlayer::player_focus_id(ui));
             (r, cache_spans)
         };
 
         // Loading overlay
         if self.telegram_load_in_progress() {
-            let video_rect = player_response.rect;
+            let video_rect = player_response.inner.rect;
             let painter = ui.painter().with_clip_rect(video_rect);
             painter.rect_filled(video_rect, 0.0, egui::Color32::from_black_alpha(70));
             let spinner_size = 40.0;
@@ -592,7 +579,7 @@ impl App for NewPlayerApp {
         }
 
         // Custom redesign HUD (auto-hide)
-        let video_rect = player_response.rect;
+        let video_rect = player_response.inner.rect;
         let hovered = ctx
             .pointer_hover_pos()
             .map(|p| video_rect.contains(p) || p.y < 40.0)
@@ -677,11 +664,12 @@ impl App for NewPlayerApp {
             // Keep the HUD clear of the (possibly open) left nav rail: indent it
             // by a small margin and shrink its width so it stays inside the video
             // rect instead of overlapping the sidebar.
+            let window_rect = ctx.viewport_rect();
             let hud_left_margin = if self.nav_rail_open { 20.0 } else { 0.0 };
-            let hud_w = (video_rect.width() - hud_left_margin).max(1.0);
+            let hud_w = (window_rect.width() - hud_left_margin).max(1.0);
             egui::Area::new("hud".into())
                 .fixed_pos(
-                    video_rect.min + egui::vec2(hud_left_margin, video_rect.height() - hud_h - hud_bottom_padding),
+                    egui::pos2(hud_left_margin, window_rect.max.y - hud_h - hud_bottom_padding),
                 )
                 .default_size(egui::vec2(hud_w, hud_h))
                 .show(&ctx, |ui| {

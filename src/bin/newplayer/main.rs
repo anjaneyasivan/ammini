@@ -657,28 +657,12 @@ impl App for NewPlayerApp {
             let mut mesh = egui::Mesh::default();
             let top_color = egui::Color32::TRANSPARENT;
             let bot_color = egui::Color32::from_black_alpha((0xd0 as f32 * hud_alpha) as u8);
-            let i = mesh.vertices.len() as u32;
-            mesh.vertices.push(egui::epaint::Vertex {
-                pos: scrim_rect.left_top(),
-                uv: egui::pos2(0.0, 0.0),
-                color: top_color,
-            });
-            mesh.vertices.push(egui::epaint::Vertex {
-                pos: scrim_rect.right_top(),
-                uv: egui::pos2(1.0, 0.0),
-                color: top_color,
-            });
-            mesh.vertices.push(egui::epaint::Vertex {
-                pos: scrim_rect.right_bottom(),
-                uv: egui::pos2(1.0, 1.0),
-                color: bot_color,
-            });
-            mesh.vertices.push(egui::epaint::Vertex {
-                pos: scrim_rect.left_bottom(),
-                uv: egui::pos2(0.0, 1.0),
-                color: bot_color,
-            });
-            mesh.indices.extend_from_slice(&[i, i + 1, i + 2, i, i + 2, i + 3]);
+            mesh.colored_vertex(scrim_rect.left_top(), top_color);
+            mesh.colored_vertex(scrim_rect.right_top(), top_color);
+            mesh.colored_vertex(scrim_rect.right_bottom(), bot_color);
+            mesh.colored_vertex(scrim_rect.left_bottom(), bot_color);
+            mesh.add_triangle(0, 1, 2);
+            mesh.add_triangle(0, 2, 3);
             ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("hud_scrim")))
                 .add(egui::Shape::mesh(mesh));
         }

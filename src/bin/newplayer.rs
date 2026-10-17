@@ -822,7 +822,7 @@ impl App for NewPlayerApp {
         let video_rect = player_response.rect;
         let hovered = ctx
             .pointer_hover_pos()
-            .map(|p| video_rect.contains(p))
+            .map(|p| video_rect.contains(p) || p.y < 40.0)
             .unwrap_or(false);
         let is_paused = self.player_mut().paused().unwrap_or(true);
         if hovered {

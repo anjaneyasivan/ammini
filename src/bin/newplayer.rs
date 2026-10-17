@@ -868,12 +868,22 @@ impl App for NewPlayerApp {
                                     egui::Stroke::new(1.0, C_BORDER2)
                                 };
                                 let txt_col = if on { C_TEXT } else { C_DIM };
-                                let btn = ui.add_sized(
-                                    egui::vec2(32.0, 32.0),
-                                    egui::Button::new(icon.rich_text().size(14.0).color(txt_col))
-                                        .fill(fill)
-                                        .stroke(stroke),
-                                );
+                                let btn = ui
+                                    .scope(|ui| {
+                                        let v = &mut ui.style_mut().visuals;
+                                        v.widgets.hovered.weak_bg_fill = fill;
+                                        v.widgets.hovered.bg_stroke = stroke;
+                                        v.widgets.hovered.fg_stroke.color = txt_col;
+                                        ui.add_sized(
+                                            egui::vec2(32.0, 32.0),
+                                            egui::Button::new(
+                                                icon.rich_text().size(14.0).color(txt_col),
+                                            )
+                                            .fill(fill)
+                                            .stroke(stroke),
+                                        )
+                                    })
+                                    .inner;
                                 if btn.clicked() {
                                     match id {
                                         "nav" => self.nav_rail_open = !self.nav_rail_open,

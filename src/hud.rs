@@ -83,14 +83,15 @@ impl AmminiApp {
                             ui.add_space(8.0);
                             let playing = !is_paused;
                             let play_icon_bytes: &[u8] = if playing {
-                                include_bytes!("../assets/icons/newplayer/pause.svg")
+                                include_bytes!("../assets/icons/newplayer/kl-pause-fill.svg")
                             } else {
-                                include_bytes!("../assets/icons/newplayer/play-arrow.svg")
+                                include_bytes!("../assets/icons/newplayer/kl-play-fill.svg")
                             };
+                            let play_uri = if playing { "pause.svg" } else { "play.svg" };
                             if ui
                                 .add(
                                     egui::Button::image(
-                                        egui::Image::from_bytes("play.svg", play_icon_bytes)
+                                        egui::Image::from_bytes(play_uri, play_icon_bytes)
                                             .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                                     )
                                     .fill(C_RAISED)
@@ -104,9 +105,9 @@ impl AmminiApp {
                                 .add(
                                     egui::Button::image(
                                         egui::Image::from_bytes(
-                                            "replay-10.svg",
+                                            "kl-rewind-fill.svg",
                                             include_bytes!(
-                                                "../assets/icons/newplayer/replay-10.svg"
+                                                "../assets/icons/newplayer/kl-rewind-fill.svg"
                                             ),
                                         )
                                         .fit_to_exact_size(egui::vec2(18.0, 18.0)),
@@ -122,9 +123,9 @@ impl AmminiApp {
                                 .add(
                                     egui::Button::image(
                                         egui::Image::from_bytes(
-                                            "forward-10.svg",
+                                            "kl-fast-forward-fill.svg",
                                             include_bytes!(
-                                                "../assets/icons/newplayer/forward-10.svg"
+                                                "../assets/icons/newplayer/kl-fast-forward-fill.svg"
                                             ),
                                         )
                                         .fit_to_exact_size(egui::vec2(18.0, 18.0)),
@@ -139,14 +140,14 @@ impl AmminiApp {
                             // volume: mute icon + slider that expands on hover
                             let muted = self.player_mut().volume().unwrap_or(50.0) <= 0.0;
                             let mute_icon: &[u8] = if muted {
-                                include_bytes!("../assets/icons/newplayer/volume-off.svg")
+                                include_bytes!("../assets/icons/newplayer/kl-volume-off-fill.svg")
                             } else {
-                                include_bytes!("../assets/icons/newplayer/volume-up.svg")
+                                include_bytes!("../assets/icons/newplayer/kl-volume-fill.svg")
                             };
                             if ui
                                 .add(
                                     egui::Button::image(
-                                        egui::Image::from_bytes("volume.svg", mute_icon)
+                                        egui::Image::from_bytes(if muted { "volume-off.svg" } else { "volume-up.svg" }, mute_icon)
                                             .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                                     )
                                     .fill(C_RAISED)
@@ -196,16 +197,16 @@ impl AmminiApp {
                                         ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
                                     let fs_icon_bytes = if is_fullscreen {
                                         include_bytes!(
-                                            "../assets/icons/newplayer/fullscreen-exit.svg"
+                                            "../assets/icons/newplayer/kl-fullscreen-exit-fill.svg"
                                         )
                                     } else {
-                                        include_bytes!("../assets/icons/newplayer/fullscreen.svg")
+                                        include_bytes!("../assets/icons/newplayer/kl-fullscreen-fill.svg")
                                     };
                                     if ui
                                         .add(
                                             egui::Button::image(
                                                 egui::Image::from_bytes(
-                                                    "fullscreen.svg",
+                                                    if is_fullscreen { "kl-fullscreen-exit-fill.svg" } else { "kl-fullscreen-fill.svg" },
                                                     fs_icon_bytes,
                                                 )
                                                 .fit_to_exact_size(egui::vec2(18.0, 18.0)),
@@ -249,9 +250,9 @@ impl AmminiApp {
                                     let subs_resp = ui.add(
                                         egui::Button::image_and_text(
                                             egui::Image::from_bytes(
-                                                "subtitles.svg",
+                                                "kl-subtitles-fill.svg",
                                                 include_bytes!(
-                                                    "../assets/icons/newplayer/subtitles.svg"
+                                                    "../assets/icons/newplayer/kl-subtitles-fill.svg"
                                                 ),
                                             )
                                             .fit_to_exact_size(egui::vec2(18.0, 18.0)),
@@ -278,9 +279,9 @@ impl AmminiApp {
                                     let audio_resp = ui.add(
                                         egui::Button::image_and_text(
                                             egui::Image::from_bytes(
-                                                "audiotrack.svg",
+                                                "kl-music-note-fill.svg",
                                                 include_bytes!(
-                                                    "../assets/icons/newplayer/audiotrack.svg"
+                                                    "../assets/icons/newplayer/kl-music-note-fill.svg"
                                                 ),
                                             )
                                             .fit_to_exact_size(egui::vec2(18.0, 18.0)),

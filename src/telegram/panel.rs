@@ -1059,8 +1059,8 @@ impl TelegramPanel {
             C_ACCENT.gamma_multiply(0.35)
         };
         let width = ui.available_width();
-        let image =
-            egui::Image::from_bytes("icon.svg", icon).fit_to_exact_size(egui::vec2(16.0, 16.0));
+        let image = egui::Image::from_bytes(format!("{:p}.svg", icon), icon)
+            .fit_to_exact_size(egui::vec2(16.0, 16.0));
         ui.add_enabled(
             enabled,
             egui::Button::image_and_text(image, egui::RichText::new(label).color(Color32::WHITE))
@@ -1072,8 +1072,8 @@ impl TelegramPanel {
 
     /// Borderless, secondary-styled button for low-emphasis actions.
     fn ghost_button(ui: &mut egui::Ui, icon: &'static [u8], label: &str) -> egui::Response {
-        let image =
-            egui::Image::from_bytes("icon.svg", icon).fit_to_exact_size(egui::vec2(16.0, 16.0));
+        let image = egui::Image::from_bytes(format!("{:p}.svg", icon), icon)
+            .fit_to_exact_size(egui::vec2(16.0, 16.0));
         ui.add(egui::Button::image_and_text(image, label).frame(false))
     }
 

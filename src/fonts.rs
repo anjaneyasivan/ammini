@@ -29,6 +29,15 @@ const NOTO_EMOJI: &[u8] = include_bytes!("../assets/fonts/NotoEmoji-Variable.ttf
 /// Source: dejavu-fonts 2.37, `ttf/DejaVuSans.ttf` (see `assets/fonts/LICENSE-DejaVu.txt`).
 const DEJA_VU_SANS: &[u8] = include_bytes!("../assets/fonts/DejaVuSans.ttf");
 
+/// JetBrains Mono, bundled as the primary monospace face (programming ligatures, clear
+/// distinction of similar glyphs). SIL Open Font License 1.1
+/// (see `assets/fonts/OFL-JetBrainsMono.txt`).
+const JETBRAINS_MONO: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
+
+/// Intel One Mono, bundled as a secondary monospace face. SIL Open Font License 1.1
+/// (see `assets/fonts/OFL-IntelOneMono.txt`).
+const INTEL_ONE_MONO: &[u8] = include_bytes!("../assets/fonts/IntelOneMono-Regular.ttf");
+
 /// System fonts tried as script fallbacks, one entry per script (entries for every
 /// platform are listed together; each is loaded only when its path exists, so this
 /// degrades gracefully). macOS entries are kept small (< 5 MB): the big ones
@@ -146,6 +155,14 @@ pub fn font_definitions() -> egui::FontDefinitions {
         Arc::new(egui::FontData::from_static(DEJA_VU_SANS)),
     );
     defs.font_data.insert(
+        "JetBrainsMono".to_owned(),
+        Arc::new(egui::FontData::from_static(JETBRAINS_MONO)),
+    );
+    defs.font_data.insert(
+        "IntelOneMono".to_owned(),
+        Arc::new(egui::FontData::from_static(INTEL_ONE_MONO)),
+    );
+    defs.font_data.insert(
         "Inter".to_owned(),
         Arc::new(egui::FontData::from_static(INTER)),
     );
@@ -181,12 +198,21 @@ pub fn font_definitions() -> egui::FontDefinitions {
         fallbacks.push((*name).to_owned());
     }
 
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-        let list = defs.families.get_mut(&family).unwrap();
-        // Inter is the primary face; our emoji/symbol/script fallbacks sit right after
-        // it, ahead of egui's builtin fonts.
+    // Proportional: Inter stays the primary face, with our emoji/symbol/script fallbacks
+    // right after it, ahead of egui's builtin fonts.
+    {
+        let list = defs.families.get_mut(&egui::FontFamily::Proportional).unwrap();
         list.insert(0, "Inter".to_owned());
         list.splice(1..1, fallbacks.iter().cloned());
+    }
+    // Monospace: JetBrains Mono first, then Intel One Mono, then Inter + the same
+    // emoji/symbol/script fallbacks so glyph coverage is identical to Proportional.
+    {
+        let list = defs.families.get_mut(&egui::FontFamily::Monospace).unwrap();
+        list.insert(0, "JetBrainsMono".to_owned());
+        list.insert(1, "IntelOneMono".to_owned());
+        list.insert(2, "Inter".to_owned());
+        list.splice(3..3, fallbacks.iter().cloned());
     }
 
     defs

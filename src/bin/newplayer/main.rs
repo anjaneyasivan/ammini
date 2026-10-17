@@ -621,6 +621,41 @@ impl App for NewPlayerApp {
             );
         }
 
+        // Gradient scrim over the bottom 25% of the picture (fades with the HUD).
+        if show_hud || hud_alpha > 0.0 {
+            let scrim_h = video_rect.height() * 0.25;
+            let scrim_rect = egui::Rect::from_min_size(
+                egui::pos2(video_rect.min.x, video_rect.max.y - scrim_h),
+                egui::vec2(video_rect.width(), scrim_h),
+            );
+            let mut mesh = egui::Mesh::default();
+            let top_color = egui::Color32::TRANSPARENT;
+            let bot_color = egui::Color32::from_black_alpha((0xd0 as f32 * hud_alpha) as u8);
+            let i = mesh.vertices.len() as u32;
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: scrim_rect.left_top(),
+                uv: egui::pos2(0.0, 0.0),
+                color: top_color,
+            });
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: scrim_rect.right_top(),
+                uv: egui::pos2(1.0, 0.0),
+                color: top_color,
+            });
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: scrim_rect.right_bottom(),
+                uv: egui::pos2(1.0, 1.0),
+                color: bot_color,
+            });
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: scrim_rect.left_bottom(),
+                uv: egui::pos2(0.0, 1.0),
+                color: bot_color,
+            });
+            mesh.indices.extend_from_slice(&[i, i + 1, i + 2, i, i + 2, i + 3]);
+            ui.painter().add(egui::Shape::mesh(mesh));
+        }
+
         if show_hud {
             let hud_h = 70.0;
             let hud_bottom_padding = 24.0;

@@ -191,6 +191,8 @@ struct NewPlayerApp {
     hud_hover: Option<(std::time::Instant, egui::Pos2)>,
     audio_menu_open: bool,
     subs_menu_open: bool,
+    frame_count: u64,
+    menu_opened_frame: u64,
 }
 
 impl NewPlayerApp {
@@ -268,6 +270,8 @@ impl NewPlayerApp {
             hud_hover: None,
             audio_menu_open: false,
             subs_menu_open: false,
+            frame_count: 0,
+            menu_opened_frame: 0,
         };
         app.fsm.init();
         Ok(app)
@@ -417,6 +421,7 @@ impl NewPlayerApp {
 
 impl App for NewPlayerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
+        self.frame_count += 1;
         let ctx = ui.ctx().clone();
         let mut events = Vec::new();
 
@@ -580,9 +585,10 @@ impl App for NewPlayerApp {
                         let dur_s = dur.floor() as i64;
                         // Audio track selector
                         let audio_label = self.audio_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Audio".to_string());
-                        if ui.add(egui::Button::new(audio_label).fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() {
+                        if ui.add(egui::Button::new(icon_label(ui, ICON_AUDIOTRACK, &audio_label)).fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() {
                             self.audio_menu_open = !self.audio_menu_open;
                             self.subs_menu_open = false;
+                            if self.audio_menu_open { self.menu_opened_frame = self.frame_count; }
                         }
                         if self.audio_menu_open {
                             egui::Area::new("audio_menu".into()).fixed_pos(egui::pos2(120.0, 100.0)).show(&ctx, |ui| {
@@ -601,9 +607,10 @@ impl App for NewPlayerApp {
                         }
                         // Subtitle track selector
                         let sub_label = self.subtitle_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Subs".to_string());
-                        if ui.add(egui::Button::new(sub_label).fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() {
+                        if ui.add(egui::Button::new(icon_label(ui, ICON_SUBTITLES, &sub_label)).fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() {
                             self.subs_menu_open = !self.subs_menu_open;
                             self.audio_menu_open = false;
+                            if self.subs_menu_open { self.menu_opened_frame = self.frame_count; }
                         }
                         if self.subs_menu_open {
                             egui::Area::new("subs_menu".into()).fixed_pos(egui::pos2(120.0, 100.0)).show(&ctx, |ui| {
@@ -731,7 +738,7 @@ impl App for NewPlayerApp {
         // VideoReady handling from drained messages needs OpenTelegramUrl event; handle via telegram fsm data?
         // We'll handle OpenTelegramUrl by checking if a video was just readied — skip for now; telegram panel handles play.
 
-        if self.audio_menu_open || self.subs_menu_open {
+        if (self.audio_menu_open || self.subs_menu_open) && self.frame_count > self.menu_opened_frame {
             if ctx.input(|i| i.pointer.any_click()) {
                 self.audio_menu_open = false;
                 self.subs_menu_open = false;

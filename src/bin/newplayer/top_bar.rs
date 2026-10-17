@@ -1,5 +1,5 @@
 //! Floating top action bar (navigation toggles) shown with the HUD.
-use crate::theme::{C_BORDER2, C_DIM, C_RAISED, C_RAISED2, C_TEXT};
+use crate::theme::{C_ACCENT, C_BORDER2, C_DIM, C_RAISED, C_RAISED2, C_TEXT};
 use eframe::egui;
 use egui_material_icons::icons::{ICON_INFO, ICON_LAYERS, ICON_MESSAGE};
 
@@ -26,23 +26,18 @@ pub fn show(
                         ("insp", ICON_INFO, *inspector_open),
                     ] {
                         let fill = if on { C_RAISED2 } else { C_RAISED };
-                        let stroke = if on {
-                            egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33, 0x33, 0x42))
-                        } else {
-                            egui::Stroke::new(1.0, C_BORDER2)
-                        };
                         let txt_col = if on { C_TEXT } else { C_DIM };
                         let btn = ui
                             .scope(|ui| {
                                 let v = &mut ui.style_mut().visuals;
-                                v.widgets.hovered.weak_bg_fill = fill;
-                                v.widgets.hovered.bg_stroke = stroke;
+                                v.widgets.hovered.weak_bg_fill = C_ACCENT.linear_multiply(0.15);
+                                v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
                                 v.widgets.hovered.fg_stroke.color = txt_col;
                                 ui.add_sized(
                                     egui::vec2(36.0, 36.0),
                                     egui::Button::new(icon.rich_text().size(16.0).color(txt_col))
                                         .fill(fill)
-                                        .stroke(stroke),
+                                        .stroke(egui::Stroke::NONE),
                                 )
                                 .on_hover_text(match id {
                                     "nav" => "Navigation rail",

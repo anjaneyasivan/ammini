@@ -665,7 +665,7 @@ impl App for NewPlayerApp {
             // by a small margin and shrink its width so it stays inside the video
             // rect instead of overlapping the sidebar.
             let window_rect = ctx.viewport_rect();
-            let hud_left_margin = if self.nav_rail_open { 20.0 } else { 0.0 };
+            let hud_left_margin = if self.nav_rail_open { 60.0 } else { 8.0 };
             let hud_w = (window_rect.width() - hud_left_margin).max(1.0);
             egui::Area::new("hud".into())
                 .fixed_pos(

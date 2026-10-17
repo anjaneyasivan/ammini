@@ -762,6 +762,15 @@ impl App for NewPlayerApp {
                                             !is_fullscreen,
                                         ));
                                     }
+                                    // Speed menu
+                                    ui.menu_button("1.0x", |ui| {
+                                        for speed in [0.5f64, 0.75, 1.0, 1.25, 1.5, 2.0] {
+                                            if ui.selectable_label(false, format!("{speed}x")).clicked() {
+                                                let _ = self.player_mut().mpv().set_property("speed", speed);
+                                                ui.close();
+                                            }
+                                        }
+                                    });
                                     // Subtitle track selector
                                     let sub_label = self
                                         .subtitle_tracks

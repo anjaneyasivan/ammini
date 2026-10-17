@@ -15,7 +15,7 @@ const RESUME_MIN_SECONDS: f64 = 3.0;
 /// Upper bound on tracked resume positions; the map is cleared when exceeded.
 const RESUME_MAX_ENTRIES: usize = 200;
 /// Cap for the recent-files list.
-const RECENT_FILES_MAX: usize = 10;
+const RECENT_FILES_MAX: usize = 120;
 /// Cap for the recent-Telegram list (same as recent files).
 const RECENT_TELEGRAM_MAX: usize = 10;
 
@@ -171,9 +171,7 @@ impl PlayerFsm {
             PlayerEvent::OpenFile(path) => {
                 self.current_index = Some(playlist_index_for(&mut self.playlist, path));
 
-                self.persistent.recent_files.retain(|p| p != path);
-                self.persistent.recent_files.insert(0, path.clone());
-                self.persistent.recent_files.truncate(RECENT_FILES_MAX);
+                record_recent_file(&mut self.persistent.recent_files, path);
 
                 sync_persistent_playlist(self);
                 load_media(self, path.clone())
@@ -494,12 +492,12 @@ mod tests {
     #[test]
     fn record_recent_file_is_capped() {
         let mut recent = Vec::new();
-        for i in 0..25 {
+        for i in 0..150 {
             record_recent_file(&mut recent, &format!("v{i}.mp4"));
         }
-        assert_eq!(recent.len(), 10);
-        assert_eq!(recent.first().unwrap(), "v24.mp4");
-        assert_eq!(recent.last().unwrap(), "v15.mp4");
+        assert_eq!(recent.len(), 120);
+        assert_eq!(recent.first().unwrap(), "v149.mp4");
+        assert_eq!(recent.last().unwrap(), "v30.mp4");
     }
 
     #[test]

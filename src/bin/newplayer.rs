@@ -550,8 +550,9 @@ impl App for NewPlayerApp {
         if show_hud {
             let hud_h = 70.0;
             egui::Area::new("hud".into()).fixed_pos(video_rect.min + egui::vec2(0.0, video_rect.height() - hud_h)).show(&ctx, |ui| {
-                ui.set_min_size(egui::vec2(video_rect.width(), hud_h));
-                ui.set_max_size(egui::vec2(video_rect.width(), hud_h));
+                let vw = video_rect.width().max(1.0);
+                ui.set_min_size(egui::vec2(vw, hud_h));
+                ui.set_max_size(egui::vec2(vw, hud_h));
                 let local = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(video_rect.width(), hud_h));
                 let _ = local;
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
@@ -583,7 +584,8 @@ impl App for NewPlayerApp {
                         ui.add_space(8.0);
                     });
                     // timeline
-                    let (tl_rect, tl_resp) = ui.allocate_exact_size(egui::vec2(video_rect.width() - 24.0, 18.0), egui::Sense::click_and_drag());
+                    let tl_w = (video_rect.width() - 24.0).max(1.0);
+                    let (tl_rect, tl_resp) = ui.allocate_exact_size(egui::vec2(tl_w, 18.0), egui::Sense::click_and_drag());
                     let tl_visual = egui::Rect::from_center_size(tl_rect.center(), egui::vec2(tl_rect.width(), 6.0));
                     let painter = ui.painter();
                     painter.rect_filled(tl_visual, 3.0, C_RAISED);
@@ -682,12 +684,6 @@ impl App for NewPlayerApp {
 // We'll add active_tab field via patch below.
 
 fn main() -> eframe::Result<()> {
-    std::panic::set_hook(Box::new(|info| {
-        use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/scratchpad/panic.log").unwrap();
-        writeln!(f, "PANIC: {info}").unwrap();
-        writeln!(f, "{}", std::backtrace::Backtrace::capture()).unwrap();
-    }));
     let options = NativeOptions {
         renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]),

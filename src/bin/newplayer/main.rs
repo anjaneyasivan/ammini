@@ -188,7 +188,7 @@ impl NewPlayerApp {
             active_tab: "telegram",
             nav_rail_open: true,
             chats_open: true,
-            inspector_open: true,
+            inspector_open: false,
             icon_cache: IconCache::new_shared(),
             hud_hover: None,
             last_input: std::time::Instant::now(),

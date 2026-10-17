@@ -89,6 +89,7 @@ struct NewPlayerApp {
     last_input: std::time::Instant,
     audio_menu_open: bool,
     subs_menu_open: bool,
+    speed_menu_open: bool,
     playback_speed: f64,
     frame_count: u64,
     menu_opened_frame: u64,
@@ -196,6 +197,7 @@ impl NewPlayerApp {
             last_input: std::time::Instant::now(),
             audio_menu_open: false,
             subs_menu_open: false,
+            speed_menu_open: false,
             playback_speed,
             frame_count: 0,
             menu_opened_frame: 0,
@@ -868,21 +870,76 @@ impl App for NewPlayerApp {
                                         .trim_end_matches('.')
                                         .to_string()
                                         + "x";
-                                    ui.menu_button(speed_label, |ui| {
-                                        for speed in [0.5f64, 0.75, 1.0, 1.25, 1.5, 2.0] {
-                                            let selected = (speed - self.playback_speed).abs() < f64::EPSILON;
-                                            let label = if selected {
-                                                format!("✓ {speed}x")
-                                            } else {
-                                                format!("{speed}x")
-                                            };
-                                            if ui.selectable_label(selected, &label).clicked() {
-                                                self.playback_speed = speed;
-                                                let _ = self.player_mut().mpv().set_property("speed", speed);
-                                                ui.close();
-                                            }
+                                    let speed_resp = ui.add(
+                                        egui::Button::new(&speed_label)
+                                            .fill(C_RAISED)
+                                            .min_size(egui::vec2(0.0, 36.0)),
+                                    );
+                                    let speed_btn_rect = speed_resp.rect;
+                                    if speed_resp.clicked() {
+                                        self.speed_menu_open = !self.speed_menu_open;
+                                        self.audio_menu_open = false;
+                                        self.subs_menu_open = false;
+                                        if self.speed_menu_open {
+                                            self.menu_opened_frame = self.frame_count;
                                         }
-                                    });
+                                    }
+                                    if self.speed_menu_open {
+                                        egui::Area::new("speed_menu".into())
+                                            .order(egui::Order::Tooltip)
+                                            .pivot(egui::Align2::LEFT_BOTTOM)
+                                            .fixed_pos(egui::pos2(
+                                                speed_btn_rect.left(),
+                                                speed_btn_rect.top() - 4.0,
+                                            ))
+                                            .show(&ctx, |ui| {
+                                                egui::Frame::new()
+                                                    .fill(C_RAISED)
+                                                    .stroke(egui::Stroke::new(1.0, C_BORDER2))
+                                                    .corner_radius(6.0)
+                                                    .inner_margin(egui::Margin::same(6))
+                                                    .show(ui, |ui| {
+                                                        ui.set_min_width(120.0);
+                                                        ui.set_max_width(160.0);
+                                                        for speed in [0.5f64, 0.75, 1.0, 1.25, 1.5, 2.0] {
+                                                            let selected = (speed - self.playback_speed).abs() < f64::EPSILON;
+                                                            let label = if selected {
+                                                                format!("✓ {speed}x")
+                                                            } else {
+                                                                format!("{speed}x")
+                                                            };
+                                                            let (rect, resp) = ui.allocate_exact_size(
+                                                                egui::vec2(ui.available_width(), 28.0),
+                                                                egui::Sense::click(),
+                                                            );
+                                                            let fill = if selected {
+                                                                C_RAISED2
+                                                            } else if resp.hovered() {
+                                                                C_ACCENT.linear_multiply(0.15)
+                                                            } else {
+                                                                egui::Color32::TRANSPARENT
+                                                            };
+                                                            ui.painter().rect_filled(rect, 4.0, fill);
+                                                            ui.painter().text(
+                                                                rect.left_center() + egui::vec2(8.0, 0.0),
+                                                                egui::Align2::LEFT_CENTER,
+                                                                &label,
+                                                                egui::FontId::proportional(12.0),
+                                                                if selected { C_TEXT } else { C_MUTED },
+                                                            );
+                                                            if resp.hovered() {
+                                                                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                                                            }
+                                                            if resp.clicked() {
+                                                                self.playback_speed = speed;
+                                                                let _ = self.player_mut().mpv().set_property("speed", speed);
+                                                                self.speed_menu_open = false;
+                                                            }
+                                                            ui.add_space(2.0);
+                                                        }
+                                                    });
+                                            });
+                                    }
                                     // Subtitle track selector
                                     let sub_label = self
                                         .subtitle_tracks
@@ -1484,12 +1541,13 @@ impl App for NewPlayerApp {
         // VideoReady handling from drained messages needs OpenTelegramUrl event; handle via telegram fsm data?
         // We'll handle OpenTelegramUrl by checking if a video was just readied — skip for now; telegram panel handles play.
 
-        if (self.audio_menu_open || self.subs_menu_open)
+        if (self.audio_menu_open || self.subs_menu_open || self.speed_menu_open)
             && self.frame_count > self.menu_opened_frame
         {
             if ctx.input(|i| i.pointer.any_click()) {
                 self.audio_menu_open = false;
                 self.subs_menu_open = false;
+                self.speed_menu_open = false;
             }
         }
         self.poll_seek();

@@ -26,15 +26,11 @@ use crate::style;
 
 // Redesign palette (mirrors docs/ui-redesign-reference.md)
 const C_TEXT: egui::Color32 = egui::Color32::from_rgb(0xf4, 0xf4, 0xf5);
-const C_TEXT2: egui::Color32 = egui::Color32::from_rgb(0xe4, 0xe4, 0xe7);
 const C_MUTED: egui::Color32 = egui::Color32::from_rgb(0xa1, 0xa1, 0xaa);
-const C_DIM: egui::Color32 = egui::Color32::from_rgb(0x71, 0x71, 0x7a);
 const C_RAISED: egui::Color32 = egui::Color32::from_rgb(0x1f, 0x1f, 0x26);
 const C_RAISED2: egui::Color32 = egui::Color32::from_rgb(0x22, 0x22, 0x2b);
 const C_BORDER2: egui::Color32 = egui::Color32::from_rgb(0x26, 0x26, 0x2e);
 const C_ACCENT: egui::Color32 = egui::Color32::from_rgb(0x3f, 0xa9, 0xad);
-const C_CANVAS: egui::Color32 = egui::Color32::from_rgb(0x0e, 0x0e, 0x11);
-const C_SIDEBAR: egui::Color32 = egui::Color32::from_rgb(0x12, 0x12, 0x15);
 use crate::telegram::media_meta::{format_bytes, format_duration};
 use crate::telegram::state_machine::{TelegramData, TelegramEvent, TelegramFsm, TelegramState};
 use crate::telegram::{BgCommand, DialogInfo, MediaMeta, MessageInfo};
@@ -119,7 +115,6 @@ impl TelegramPanel {
     // ------------------------------------------------------------------ screens
 
     fn connecting_ui(&self, ui: &mut egui::Ui) {
-        let dark = true;
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.35);
             ui.spinner();
@@ -553,7 +548,6 @@ impl TelegramPanel {
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
         let dark = true;
-
         // Header ------------------------------------------------------------
         let mut back = false;
         ui.add_space(8.0);
@@ -649,7 +643,7 @@ impl TelegramPanel {
                                 VideoStatus::Ready
                             };
                             let before = ui.min_rect();
-                            if Self::message_bubble(ui, msg, dark, status) {
+                            if Self::message_bubble(ui, msg, status) {
                                 play_msg = Some(msg.id);
                             }
                             if highlight_active && highlight == Some(msg.id) {
@@ -718,7 +712,6 @@ impl TelegramPanel {
         );
 
         if ui.is_rect_visible(rect) {
-            let dark = true;
             let fill = if selected {
                 C_RAISED2
             } else if response.hovered() {
@@ -774,7 +767,6 @@ impl TelegramPanel {
     fn message_bubble(
         ui: &mut egui::Ui,
         msg: &MessageInfo,
-        dark: bool,
         status: VideoStatus,
     ) -> bool {
         let is_me = msg.sender_is_self;
@@ -822,7 +814,6 @@ impl TelegramPanel {
                                 ui,
                                 msg.media.as_ref(),
                                 is_me,
-                                dark,
                                 status,
                                 !has_text,
                                 max_width < 220.0,
@@ -844,13 +835,12 @@ impl TelegramPanel {
         ui: &mut egui::Ui,
         media: Option<&MediaMeta>,
         is_me: bool,
-        dark: bool,
         status: VideoStatus,
         show_titles: bool,
         compact: bool,
     ) -> bool {
         let text_color = if is_me { Color32::WHITE } else { C_TEXT };
-        let secondary = Self::secondary_on(is_me, dark);
+        let secondary = Self::secondary_on(is_me);
         let status_color = if is_me {
             Color32::from_white_alpha(0xDD)
         } else {
@@ -927,10 +917,10 @@ impl TelegramPanel {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
                 for chip in meta.chips.iter().take(4) {
-                    Self::chip(ui, chip, is_me, dark);
+                    Self::chip(ui, chip);
                 }
                 if meta.chips.len() > 4 {
-                    Self::chip(ui, &format!("+{}", meta.chips.len() - 4), is_me, dark);
+                    Self::chip(ui, &format!("+{}", meta.chips.len() - 4));
                 }
             });
         }
@@ -1008,7 +998,7 @@ impl TelegramPanel {
     }
 
     /// A rounded, bordered metadata chip (quality/encoding tag).
-    fn chip(ui: &mut egui::Ui, label: &str, is_me: bool, dark: bool) {
+    fn chip(ui: &mut egui::Ui, label: &str) {
         egui::Frame::new()
             .fill(C_RAISED)
             .stroke(egui::Stroke::new(1.0, C_BORDER2))
@@ -1021,7 +1011,7 @@ impl TelegramPanel {
     }
 
     /// Secondary text that stays readable on the accent (own-message) fill.
-    fn secondary_on(on_accent: bool, dark: bool) -> Color32 {
+    fn secondary_on(on_accent: bool) -> Color32 {
         if on_accent {
             Color32::from_white_alpha(0xB8)
         } else {
@@ -1091,7 +1081,6 @@ impl TelegramPanel {
 
     /// Placeholder shown when a list has nothing in it (yet).
     fn empty_state(ui: &mut egui::Ui, message: &str, spinner: bool) {
-        let dark = true;
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.3);
             if spinner {
@@ -1110,7 +1099,6 @@ impl TelegramPanel {
         password: bool,
         value: &mut String,
     ) -> egui::Response {
-        let dark = true;
         ui.label(RichText::new(label).size(12.0).color(C_MUTED));
         ui.add(
             egui::TextEdit::singleline(value)

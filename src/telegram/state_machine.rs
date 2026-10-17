@@ -541,6 +541,12 @@ mod tests {
             .map(|i| DialogInfo {
                 peer_ref: peer_ref(i + 1),
                 name: format!("Chat {i}"),
+                username: None,
+                dialog_type: "direct",
+                is_verified: false,
+                is_muted: false,
+                is_pinned: false,
+                unread_count: 0,
                 last_message: None,
             })
             .collect();
@@ -589,6 +595,12 @@ mod tests {
             .map(|i| DialogInfo {
                 peer_ref: peer_ref(i + 1),
                 name: format!("Chat {i}"),
+                username: None,
+                dialog_type: "direct",
+                is_verified: false,
+                is_muted: false,
+                is_pinned: false,
+                unread_count: 0,
                 last_message: None,
             })
             .collect();
@@ -633,11 +645,23 @@ mod tests {
                 DialogInfo {
                     peer_ref: other,
                     name: "Other".to_owned(),
+                    username: None,
+                    dialog_type: "direct",
+                    is_verified: false,
+                    is_muted: false,
+                    is_pinned: false,
+                    unread_count: 0,
                     last_message: Some("old".to_owned()),
                 },
                 DialogInfo {
                     peer_ref: open,
                     name: "Open".to_owned(),
+                    username: None,
+                    dialog_type: "direct",
+                    is_verified: false,
+                    is_muted: false,
+                    is_pinned: false,
+                    unread_count: 0,
                     last_message: None,
                 },
             ],

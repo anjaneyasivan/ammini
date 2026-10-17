@@ -238,10 +238,6 @@ impl NewPlayerApp {
         unsafe { &mut self.fsm.inner_mut().proxy_url }
     }
 
-    fn status_mut(&mut self) -> &mut String {
-        unsafe { &mut self.fsm.inner_mut().status }
-    }
-
     fn handle_dropped_files(&mut self, ctx: &egui::Context, events: &mut Vec<PlayerEvent>) {
         let dropped: Vec<_> = ctx.input(|i| {
             i.raw
@@ -650,18 +646,23 @@ impl App for NewPlayerApp {
 
         if show_hud {
             let hud_h = 70.0;
+            // Keep the HUD clear of the (possibly open) left nav rail: indent it
+            // by a small margin and shrink its width so it stays inside the video
+            // rect instead of overlapping the sidebar.
+            let hud_left_margin = if self.nav_rail_open { 20.0 } else { 0.0 };
+            let hud_w = (video_rect.width() - hud_left_margin).max(1.0);
             egui::Area::new("hud".into())
-                .fixed_pos(video_rect.min + egui::vec2(0.0, video_rect.height() - hud_h))
+                .fixed_pos(
+                    video_rect.min + egui::vec2(hud_left_margin, video_rect.height() - hud_h),
+                )
+                .default_size(egui::vec2(hud_w, hud_h))
                 .show(&ctx, |ui| {
-                    let vw = video_rect.width().max(1.0);
+                    let vw = hud_w;
                     ui.set_min_size(egui::vec2(vw, hud_h));
                     ui.set_max_size(egui::vec2(vw, hud_h));
-                    let local = egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(video_rect.width(), hud_h),
-                    );
+                    let local = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(vw, hud_h));
                     let _ = local;
-                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                         // controls row
                         ui.horizontal(|ui| {
                             ui.add_space(8.0);
@@ -886,11 +887,16 @@ impl App for NewPlayerApp {
                             ui.add_space(8.0);
                         });
                         // timeline
-                        let tl_w = (video_rect.width() - 24.0).max(1.0);
-                        let (tl_rect, tl_resp) = ui.allocate_exact_size(
-                            egui::vec2(tl_w, 18.0),
-                            egui::Sense::click_and_drag(),
-                        );
+                        let tl_w = (vw - 16.0).max(1.0);
+                        let (tl_rect, tl_resp) = ui
+                            .horizontal(|ui| {
+                                ui.add_space(8.0);
+                                ui.allocate_exact_size(
+                                    egui::vec2(tl_w, 18.0),
+                                    egui::Sense::click_and_drag(),
+                                )
+                            })
+                            .inner;
                         let tl_visual = egui::Rect::from_center_size(
                             tl_rect.center(),
                             egui::vec2(tl_rect.width(), 6.0),
@@ -963,15 +969,6 @@ impl App for NewPlayerApp {
                             ui.set_width(300.0);
                             ui.set_min_height(ctx.viewport_rect().height() - 8.0);
                             ui.set_max_height(ctx.viewport_rect().height() - 8.0);
-                            let title = match self.active_tab {
-                                "telegram" => "TELEGRAM",
-                                "recent" => "RECENTLY PLAYED",
-                                "library" => "LIBRARY",
-                                "audio" => "AUDIO",
-                                "subtitles" => "SUBTITLES",
-                                "settings" => "SETTINGS",
-                                _ => "PANEL",
-                            };
                             ui.add_space(4.0);
                             match self.active_tab {
                                 "telegram" => {

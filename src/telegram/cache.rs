@@ -866,6 +866,18 @@ mod tests {
         let fresh_b = dir.join("3_3.bin");
         std::fs::write(&fresh_a, vec![0u8; 2000]).unwrap();
         std::fs::write(&fresh_b, vec![0u8; 3000]).unwrap();
+        // Explicit mtimes: back-to-back writes can share a timestamp on coarse-clock
+        // filesystems (ext4), and the tie then falls to readdir order, which is not
+        // alphabetical there — `fresh_a` must be the older one.
+        let now = SystemTime::now();
+        for (path, age) in [(&fresh_a, 20), (&fresh_b, 10)] {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(now - Duration::from_secs(age))
+                .unwrap();
+        }
         std::fs::write(dir.join("2_2.bin.meta"), b"junk").unwrap();
         std::fs::write(dir.join("4_4.bin.tmp"), b"x").unwrap();
 

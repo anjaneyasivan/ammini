@@ -189,7 +189,7 @@ impl AmminiApp {
                     let in_overlay = pos
                         .map(|p| chats_resp.response.rect.contains(p))
                         .unwrap_or(false);
-                    let in_navrail = pos.map(|p| p.x < 60.0 && p.y >= 40.0).unwrap_or(false);
+                    let in_navrail = pos.map(|p| p.x < 60.0).unwrap_or(false);
                     let in_toolbar = pos
                         .map(|p| p.y >= video_rect.min.y && p.y < video_rect.min.y + 40.0)
                         .unwrap_or(false);

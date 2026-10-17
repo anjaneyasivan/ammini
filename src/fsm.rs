@@ -98,6 +98,8 @@ impl PlayerFsm {
         match event {
             PlayerEvent::Poll => {
                 if is_loaded(&self.player) {
+                    // Ensure playback actually starts (mpv may report loaded while still paused).
+                    let _ = self.player.play();
                     if let Some(pos) = self.resume_pending.take() {
                         match self.player.seek_to(pos) {
                             Ok(()) => info!("resumed at {pos:.1}s"),
@@ -242,6 +244,8 @@ fn load_media(fsm: &mut PlayerFsm, path: String) -> Outcome<FsmState> {
     fsm.resume_pending = resume_offset(&fsm.persistent.resume, &path);
     match fsm.player.load_file(&path) {
         Ok(()) => {
+            // Kick playback so mpv doesn't sit paused on a freshly loaded stream.
+            let _ = fsm.player.play();
             info!("loading media: {path}");
             crate::telemetry::emit(crate::telemetry::TelemetryEvent::PlaybackStarted {
                 source: playback_source(&path),

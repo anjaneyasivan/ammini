@@ -572,7 +572,9 @@ impl App for NewPlayerApp {
                         }
                         let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
                         let dur = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
-                        ui.label(egui::RichText::new(format!("{:.0}:{:02} / {:.0}:{:02}", pos/60.0, pos%60.0, dur/60.0, dur%60.0)).monospace().size(11.0).color(C_MUTED));
+                        let pos_s = pos.floor() as i64;
+                        let dur_s = dur.floor() as i64;
+                        ui.label(egui::RichText::new(format!("{:02}:{:02} / {:02}:{:02}", pos_s / 60, pos_s % 60, dur_s / 60, dur_s % 60)).monospace().size(11.0).color(C_MUTED));
                         let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
                         if ui.add(egui::Button::new(if is_fullscreen { "⤓" } else { "⤢" }).fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
@@ -651,7 +653,6 @@ impl App for NewPlayerApp {
         }
 
         eprintln!("[dbg] dispatching {} events", events.len());
-        for event in &events { eprintln!("[dbg]   event: {event:?}"); }
         for event in events {
             match event { PlayerEvent::Poll => trace!("poll"), _ => debug!("{event:?}") }
             self.fsm.handle(&event);

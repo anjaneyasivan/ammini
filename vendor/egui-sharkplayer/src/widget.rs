@@ -221,6 +221,8 @@ pub struct SharkPlayer<'a, P: ControlsIconProvider = DefaultControlsIconProvider
     background_color: Color32,
     controls_timeout: Duration,
     animations: bool,
+    // Ammini patch #6: when false, skip painting the built-in HUD so the host can draw its own.
+    show_hud: bool,
     keybinds: Keybinds,
     on_error: Rc<dyn Fn(Error)>,
     // Ammini patch #3: invoked after an arrow/skip-button seek, so the app can
@@ -268,6 +270,7 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
             background_color: Color32::from_black_alpha(169),
             controls_timeout: Duration::from_secs(3),
             animations: true,
+            show_hud: true,
             keybinds: Keybinds::default(),
             on_error: Rc::new(|e| {
                 error!("{e}");
@@ -286,6 +289,12 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
     /// Whether to use animations.
     pub fn animations(mut self, show: bool) -> Self {
         self.animations = show;
+        self
+    }
+
+    /// Ammini patch #6: toggle the built-in HUD. When false, the host draws its own HUD.
+    pub fn show_hud(mut self, show: bool) -> Self {
+        self.show_hud = show;
         self
     }
 
@@ -1045,7 +1054,7 @@ impl<'a, P: ControlsIconProvider> SharkPlayer<'a, P> {
             } else {
                 1.0
             };
-            if opacity > 0.0 {
+            if self.show_hud && opacity > 0.0 {
                 ui.scope(|ui| {
                     ui.multiply_opacity(opacity);
 

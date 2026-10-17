@@ -1193,6 +1193,9 @@ impl App for NewPlayerApp {
                                             egui::FontId::proportional(13.0),
                                             if t.selected { C_TEXT } else { C_MUTED },
                                         );
+                                        if resp.hovered() {
+                                            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                                        }
                                         if resp.clicked() {
                                             if let Ok(()) = self
                                                 .player_mut()

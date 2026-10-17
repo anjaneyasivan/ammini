@@ -10,12 +10,14 @@ pub fn show(
     inspector_open: &mut bool,
     alpha: f32,
 ) {
+    let bar_w = 220.0;
+    let vr = ctx.viewport_rect();
     egui::Area::new("top_header".into())
         .order(egui::Order::Tooltip)
-        .fixed_pos(egui::pos2(0.0, 8.0))
+        .fixed_pos(egui::pos2(vr.max.x - bar_w, 8.0))
         .show(ctx, |ui| {
             ui.set_opacity(alpha);
-            ui.set_width(ctx.viewport_rect().width());
+            ui.set_width(bar_w);
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(12.0);

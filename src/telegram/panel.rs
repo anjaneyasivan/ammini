@@ -746,8 +746,11 @@ impl TelegramPanel {
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
-                for chip in &meta.chips {
+                for chip in meta.chips.iter().take(4) {
                     Self::chip(ui, chip, is_me, dark);
+                }
+                if meta.chips.len() > 4 {
+                    Self::chip(ui, &format!("+{}", meta.chips.len() - 4), is_me, dark);
                 }
             });
         }
@@ -830,7 +833,7 @@ impl TelegramPanel {
             .fill(C_RAISED)
             .stroke(egui::Stroke::new(1.0, C_BORDER2))
             .corner_radius(CornerRadius::same(6))
-            .inner_margin(Margin::symmetric(7, 3))
+            .inner_margin(Margin::symmetric(5, 2))
             .show(ui, |ui| {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                 ui.label(

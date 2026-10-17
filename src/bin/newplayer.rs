@@ -306,12 +306,7 @@ impl App for NewPlayerApp {
                     });
                     match self.active_tab {
                         "telegram" => {
-                            if self.show_telegram {
-                                self.telegram_panel.ui(ui, &mut self.telegram_fsm, &self.bg_tx);
-                            } else {
-                                ui.label(egui::RichText::new("Click Telegram icon or 'Open URL' to start").color(C_MUTED));
-                                if ui.button("Open URL").clicked() { self.show_telegram = true; }
-                            }
+                            self.telegram_panel.ui(ui, &mut self.telegram_fsm, &self.bg_tx);
                         }
                         "audio" => {
                             ui.label(egui::RichText::new("Audio tracks").color(C_MUTED));

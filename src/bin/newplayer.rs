@@ -847,10 +847,12 @@ impl App for NewPlayerApp {
         // Floating top header (toggles), visible with HUD
         if show_hud {
             egui::Area::new("top_header".into())
-                .fixed_pos(video_rect.min)
+                .fixed_pos(egui::pos2(0.0, 0.0))
                 .show(&ctx, |ui| {
+                    ui.set_min_width(ctx.viewport_rect().width());
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(12.0);
                             for (id, icon, on) in [
                                 ("nav", ICON_LAYERS, self.nav_rail_open),
                                 ("chat", ICON_MESSAGE, self.chats_open),

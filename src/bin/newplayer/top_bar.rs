@@ -31,6 +31,7 @@ pub fn show(
                             .scope(|ui| {
                                 let v = &mut ui.style_mut().visuals;
                                 v.widgets.hovered.weak_bg_fill = C_ACCENT.linear_multiply(0.15);
+                                v.widgets.hovered.bg_fill = C_ACCENT.linear_multiply(0.15);
                                 v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
                                 v.widgets.hovered.fg_stroke.color = txt_col;
                                 ui.add_sized(

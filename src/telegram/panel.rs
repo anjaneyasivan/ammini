@@ -828,6 +828,7 @@ impl TelegramPanel {
             .corner_radius(CornerRadius::same(6))
             .inner_margin(Margin::symmetric(7, 3))
             .show(ui, |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                 ui.label(
                     RichText::new(label)
                         .monospace()

@@ -583,20 +583,21 @@ impl App for NewPlayerApp {
                         ui.add_space(8.0);
                     });
                     // timeline
-                    let (tl_rect, tl_resp) = ui.allocate_exact_size(egui::vec2(video_rect.width() - 24.0, 6.0), egui::Sense::click_and_drag());
+                    let (tl_rect, tl_resp) = ui.allocate_exact_size(egui::vec2(video_rect.width() - 24.0, 18.0), egui::Sense::click_and_drag());
+                    let tl_visual = egui::Rect::from_center_size(tl_rect.center(), egui::vec2(tl_rect.width(), 6.0));
                     let painter = ui.painter();
-                    painter.rect_filled(tl_rect, 3.0, C_RAISED);
+                    painter.rect_filled(tl_visual, 3.0, C_RAISED);
                     // buffered
                     let dur = self.player_mut().duration().ok().flatten().unwrap_or(1.0).max(1.0);
                     for (s, e) in &cache_spans {
-                        let x0 = tl_rect.min.x + (s / dur) as f32 * tl_rect.width();
-                        let x1 = tl_rect.min.x + (e / dur) as f32 * tl_rect.width();
-                        painter.rect_filled(egui::Rect::from_min_max(egui::pos2(x0, tl_rect.min.y), egui::pos2(x1, tl_rect.max.y)), 3.0, egui::Color32::from_rgb(0x36,0x36,0x44));
+                        let x0 = tl_visual.min.x + (s / dur) as f32 * tl_visual.width();
+                        let x1 = tl_visual.min.x + (e / dur) as f32 * tl_visual.width();
+                        painter.rect_filled(egui::Rect::from_min_max(egui::pos2(x0, tl_visual.min.y), egui::pos2(x1, tl_visual.max.y)), 3.0, egui::Color32::from_rgb(0x36,0x36,0x44));
                     }
                     // played
                     let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
-                    let played_w = (pos / dur) as f32 * tl_rect.width();
-                    painter.rect_filled(egui::Rect::from_min_size(tl_rect.min, egui::vec2(played_w, tl_rect.height())), 3.0, C_TEXT);
+                    let played_w = (pos / dur) as f32 * tl_visual.width();
+                    painter.rect_filled(egui::Rect::from_min_size(tl_visual.min, egui::vec2(played_w, tl_visual.height())), 3.0, C_TEXT);
                     if tl_resp.hovered() { ctx.set_cursor_icon(egui::CursorIcon::PointingHand); }
                     if tl_resp.clicked() || tl_resp.dragged() {
                         if let Some(p) = tl_resp.interact_pointer_pos() {

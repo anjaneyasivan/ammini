@@ -601,7 +601,7 @@ impl App for NewPlayerApp {
 
         if show_hud {
             let hud_h = 70.0;
-            let hud_bottom_padding = 10.0;
+            let hud_bottom_padding = 24.0;
             // Keep the HUD clear of the (possibly open) left nav rail: indent it
             // by a small margin and shrink its width so it stays inside the video
             // rect instead of overlapping the sidebar.

@@ -565,6 +565,7 @@ impl TelegramPanel {
                         .size(15.0)
                         .color(C_TEXT),
                 )
+                .selectable(false)
                 .truncate(),
             );
             if let Some(preview) = &dialog.last_message {
@@ -574,6 +575,7 @@ impl TelegramPanel {
                             .size(12.5)
                             .color(C_MUTED),
                     )
+                    .selectable(false)
                     .truncate(),
                 );
             }

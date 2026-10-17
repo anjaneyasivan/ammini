@@ -514,16 +514,27 @@ async fn run_telegram(
             }
             BgCommand::SearchChats(query) => {
                 if query.trim().is_empty() {
-                    let _ = ui_tx.send(UiMessage::SearchResults { query, results: vec![] });
+                    let _ = ui_tx.send(UiMessage::SearchResults {
+                        query,
+                        results: vec![],
+                    });
                     continue;
                 }
                 let mut iter = client.clone_inner().search_all_messages().query(&query);
                 let mut results = Vec::new();
                 let mut seen_peers = std::collections::HashSet::new();
                 while let Ok(Some(msg)) = iter.next().await {
-                    if results.len() >= 20 { break; }
-                    let peer = match msg.peer() { Some(p) => p, None => continue };
-                    let peer_ref = match peer.to_ref().await { Ok(Some(r)) => r, _ => continue };
+                    if results.len() >= 20 {
+                        break;
+                    }
+                    let peer = match msg.peer() {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    let peer_ref = match peer.to_ref().await {
+                        Ok(Some(r)) => r,
+                        _ => continue,
+                    };
                     let chat_name = peer.name().unwrap_or("Unknown").to_string();
                     let snippet = if !msg.text().is_empty() {
                         msg.text().to_string()

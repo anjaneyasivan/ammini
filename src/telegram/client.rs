@@ -535,10 +535,21 @@ fn map_dialog(dialog: &grammers_client::peer::Dialog) -> DialogInfo {
     };
     let dialog_type = match peer {
         grammers_client::peer::Peer::User(u) => {
-            if u.is_bot() { "bot" } else { "direct" }
+            if u.is_bot() {
+                "bot"
+            } else {
+                "direct"
+            }
         }
         grammers_client::peer::Peer::Channel(c) => {
-            if matches!(c.kind(), Some(grammers_session::types::ChannelKind::Broadcast)) { "channel" } else { "group" }
+            if matches!(
+                c.kind(),
+                Some(grammers_session::types::ChannelKind::Broadcast)
+            ) {
+                "channel"
+            } else {
+                "group"
+            }
         }
         grammers_client::peer::Peer::Group(_) => "group",
     };

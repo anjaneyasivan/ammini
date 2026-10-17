@@ -78,7 +78,10 @@ pub struct TelegramPanel {
 
 impl TelegramPanel {
     pub fn new() -> Self {
-        Self { open_chat: None, search_deadline: None }
+        Self {
+            open_chat: None,
+            search_deadline: None,
+        }
     }
 
     pub fn ui(
@@ -331,7 +334,8 @@ impl TelegramPanel {
             );
             if resp.changed() {
                 unsafe { &mut fsm.inner_mut().data }.search_query = q.clone();
-                self.search_deadline = Some(std::time::Instant::now() + std::time::Duration::from_millis(400));
+                self.search_deadline =
+                    Some(std::time::Instant::now() + std::time::Duration::from_millis(400));
                 if q.trim().is_empty() {
                     unsafe { &mut fsm.inner_mut().data }.search_results.clear();
                     unsafe { &mut fsm.inner_mut().data }.search_loading = false;
@@ -361,22 +365,42 @@ impl TelegramPanel {
         if !is_searching {
             // Filter pills (horizontally scrollable)
             ui.add_space(0.0);
-            egui::ScrollArea::horizontal().id_salt("tg_filter_pills").max_width(ui.available_width()).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add_space(12.0);
-                    for f in ["All", "Channels", "Groups", "Directs", "Unread", "Media"] {
-                        let active = fsm.data.dialog_filter == f;
-                        let fill = if active { C_RAISED2 } else { Color32::TRANSPARENT };
-                        let stroke = if active { egui::Stroke::new(1.0, C_BORDER2) } else { egui::Stroke::NONE };
-                        let btn = ui.add(egui::Button::new(RichText::new(f).size(10.0).color(if active { C_TEXT } else { C_MUTED }))
-                            .fill(fill).stroke(stroke).corner_radius(CornerRadius::same(4)).min_size(egui::vec2(0.0, 20.0)));
-                        if btn.clicked() {
-                            unsafe { &mut fsm.inner_mut().data }.dialog_filter = f.to_string();
+            egui::ScrollArea::horizontal()
+                .id_salt("tg_filter_pills")
+                .max_width(ui.available_width())
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add_space(12.0);
+                        for f in ["All", "Channels", "Groups", "Directs", "Unread", "Media"] {
+                            let active = fsm.data.dialog_filter == f;
+                            let fill = if active {
+                                C_RAISED2
+                            } else {
+                                Color32::TRANSPARENT
+                            };
+                            let stroke = if active {
+                                egui::Stroke::new(1.0, C_BORDER2)
+                            } else {
+                                egui::Stroke::NONE
+                            };
+                            let btn = ui.add(
+                                egui::Button::new(RichText::new(f).size(10.0).color(if active {
+                                    C_TEXT
+                                } else {
+                                    C_MUTED
+                                }))
+                                .fill(fill)
+                                .stroke(stroke)
+                                .corner_radius(CornerRadius::same(4))
+                                .min_size(egui::vec2(0.0, 20.0)),
+                            );
+                            if btn.clicked() {
+                                unsafe { &mut fsm.inner_mut().data }.dialog_filter = f.to_string();
+                            }
+                            ui.add_space(4.0);
                         }
-                        ui.add_space(4.0);
-                    }
+                    });
                 });
-            });
             ui.add_space(6.0);
         }
 
@@ -392,7 +416,12 @@ impl TelegramPanel {
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
                     // HardDrive icon placeholder
-                    ui.label(RichText::new("Local Cache: 12.4 GB").monospace().size(10.0).color(C_MUTED));
+                    ui.label(
+                        RichText::new("Local Cache: 12.4 GB")
+                            .monospace()
+                            .size(10.0)
+                            .color(C_MUTED),
+                    );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(12.0);
                         if Self::ghost_button(ui, ICON_LOGOUT, "Sign out").clicked() {
@@ -418,19 +447,50 @@ impl TelegramPanel {
                     ui.label(RichText::new("No results").color(C_MUTED));
                     return;
                 }
-                egui::ScrollArea::vertical().id_salt("tg_search_results").auto_shrink([false, false]).show(ui, |ui| {
-                    for res in fsm.data.search_results.clone() {
-                        let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 52.0), Sense::click());
-                        ui.painter().rect_filled(rect, 4.0, if resp.hovered() { C_RAISED } else { Color32::TRANSPARENT });
-                        ui.painter().text(rect.left_top() + egui::vec2(8.0, 6.0), Align2::LEFT_TOP, &res.chat_name, FontId::proportional(12.0), C_TEXT);
-                        let snippet = if res.snippet.chars().count() > 46 { format!("{}…", res.snippet.chars().take(46).collect::<String>()) } else { res.snippet.clone() };
-                        ui.painter().text(rect.left_top() + egui::vec2(8.0, 24.0), Align2::LEFT_TOP, &snippet, FontId::monospace(10.0), C_MUTED);
-                        if resp.clicked() {
-                            selected = Some(res.peer);
-                            unsafe { &mut fsm.inner_mut().data }.search_target_message = Some(res.message_id);
+                egui::ScrollArea::vertical()
+                    .id_salt("tg_search_results")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for res in fsm.data.search_results.clone() {
+                            let (rect, resp) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), 52.0),
+                                Sense::click(),
+                            );
+                            ui.painter().rect_filled(
+                                rect,
+                                4.0,
+                                if resp.hovered() {
+                                    C_RAISED
+                                } else {
+                                    Color32::TRANSPARENT
+                                },
+                            );
+                            ui.painter().text(
+                                rect.left_top() + egui::vec2(8.0, 6.0),
+                                Align2::LEFT_TOP,
+                                &res.chat_name,
+                                FontId::proportional(12.0),
+                                C_TEXT,
+                            );
+                            let snippet = if res.snippet.chars().count() > 46 {
+                                format!("{}…", res.snippet.chars().take(46).collect::<String>())
+                            } else {
+                                res.snippet.clone()
+                            };
+                            ui.painter().text(
+                                rect.left_top() + egui::vec2(8.0, 24.0),
+                                Align2::LEFT_TOP,
+                                &snippet,
+                                FontId::monospace(10.0),
+                                C_MUTED,
+                            );
+                            if resp.clicked() {
+                                selected = Some(res.peer);
+                                unsafe { &mut fsm.inner_mut().data }.search_target_message =
+                                    Some(res.message_id);
+                            }
                         }
-                    }
-                });
+                    });
                 if let Some(peer) = selected {
                     let msg_id = fsm.data.search_target_message.unwrap_or(0);
                     fsm.handle(&TelegramEvent::SearchResultSelected { peer, msg_id });
@@ -456,7 +516,9 @@ impl TelegramPanel {
                             "Media" => true,
                             _ => true,
                         };
-                        if !passes { continue; }
+                        if !passes {
+                            continue;
+                        }
                         let is_selected = fsm.data.selected_chat == Some(dialog.peer_ref);
                         if Self::chat_row(ui, dialog, is_selected).clicked() {
                             selected = Some(dialog.peer_ref);
@@ -532,88 +594,95 @@ impl TelegramPanel {
         let mut play_msg: Option<i32> = None;
         let mut load_older = false;
         let highlight = fsm.data.highlight_message;
-        let highlight_active = highlight.is_some() && fsm.data.highlight_until.map(|t| std::time::Instant::now() < t).unwrap_or(false);
+        let highlight_active = highlight.is_some()
+            && fsm
+                .data
+                .highlight_until
+                .map(|t| std::time::Instant::now() < t)
+                .unwrap_or(false);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.inner_margin(Margin::symmetric(12, 0)))
             .show(ui, |ui| {
-            if fsm.data.messages.is_empty() {
-                Self::empty_state(ui, "No messages", true);
-                return;
-            }
-            egui::ScrollArea::vertical()
-                .id_salt(("tg_messages", &chat_key))
-                .auto_shrink([false, false])
-                .max_height(10000.0)
-                .stick_to_bottom(true)
-                .show(ui, |ui| {
-                    let scroll_target = fsm.data.search_target_message;
-                    if fsm.data.has_more_messages {
-                        if Self::load_more_button(ui, "Load older messages").clicked() {
-                            load_older = true;
-                        }
-                        ui.add_space(8.0);
-                    }
-
-                    let messages = &fsm.data.messages;
-                    for (i, msg) in messages.iter().enumerate() {
-                        let is_me = msg.sender_is_self;
-                        let starts_group = i == 0
-                            || messages[i.saturating_sub(1)].sender != msg.sender
-                            || messages[i.saturating_sub(1)].sender_is_self != is_me;
-                        if starts_group && !msg.sender.is_empty() {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(&msg.sender)
-                                        .size(12.0)
-                                        .color(C_MUTED),
-                                );
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.label(
-                                        RichText::new(&msg.time)
-                                            .size(11.0)
-                                            .color(C_MUTED),
-                                    );
-                                });
-                            });
-                            ui.add_space(3.0);
-                        }
-
-                        let status = if fsm.data.current_video == Some(msg.id) {
-                            if fsm.data.loading_video {
-                                VideoStatus::Loading
-                            } else {
-                                VideoStatus::Playing
+                if fsm.data.messages.is_empty() {
+                    Self::empty_state(ui, "No messages", true);
+                    return;
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt(("tg_messages", &chat_key))
+                    .auto_shrink([false, false])
+                    .max_height(10000.0)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        let scroll_target = fsm.data.search_target_message;
+                        if fsm.data.has_more_messages {
+                            if Self::load_more_button(ui, "Load older messages").clicked() {
+                                load_older = true;
                             }
-                        } else {
-                            VideoStatus::Ready
-                        };
-                        let before = ui.min_rect();
-                        if Self::message_bubble(ui, msg, dark, status) {
-                            play_msg = Some(msg.id);
-                        }
-                        if highlight_active && highlight == Some(msg.id) {
-                            let after = ui.min_rect();
-                            let rect = egui::Rect::from_min_max(before.min, after.max);
-                            ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0x9b, 0x59, 0xb6)), egui::StrokeKind::Outside);
-                        }
-                        if scroll_target == Some(msg.id) {
-                            ui.scroll_to_cursor(Some(Align::Center));
+                            ui.add_space(8.0);
                         }
 
-                        let next_same_group = messages.get(i + 1).is_some_and(|n| {
-                            n.sender == msg.sender && n.sender_is_self == msg.sender_is_self
-                        });
-                        ui.add_space(if next_same_group { 3.0 } else { 12.0 });
-                    }
-                });
+                        let messages = &fsm.data.messages;
+                        for (i, msg) in messages.iter().enumerate() {
+                            let is_me = msg.sender_is_self;
+                            let starts_group = i == 0
+                                || messages[i.saturating_sub(1)].sender != msg.sender
+                                || messages[i.saturating_sub(1)].sender_is_self != is_me;
+                            if starts_group && !msg.sender.is_empty() {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(&msg.sender).size(12.0).color(C_MUTED));
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        ui.label(
+                                            RichText::new(&msg.time).size(11.0).color(C_MUTED),
+                                        );
+                                    });
+                                });
+                                ui.add_space(3.0);
+                            }
 
-            if just_opened {
-                ui.scroll_to_cursor(Some(Align::BOTTOM));
-            }
-            if highlight_active {
-                ui.ctx().request_repaint();
-            }
-        });
+                            let status = if fsm.data.current_video == Some(msg.id) {
+                                if fsm.data.loading_video {
+                                    VideoStatus::Loading
+                                } else {
+                                    VideoStatus::Playing
+                                }
+                            } else {
+                                VideoStatus::Ready
+                            };
+                            let before = ui.min_rect();
+                            if Self::message_bubble(ui, msg, dark, status) {
+                                play_msg = Some(msg.id);
+                            }
+                            if highlight_active && highlight == Some(msg.id) {
+                                let after = ui.min_rect();
+                                let rect = egui::Rect::from_min_max(before.min, after.max);
+                                ui.painter().rect_stroke(
+                                    rect,
+                                    8.0,
+                                    egui::Stroke::new(
+                                        2.0,
+                                        egui::Color32::from_rgb(0x9b, 0x59, 0xb6),
+                                    ),
+                                    egui::StrokeKind::Outside,
+                                );
+                            }
+                            if scroll_target == Some(msg.id) {
+                                ui.scroll_to_cursor(Some(Align::Center));
+                            }
+
+                            let next_same_group = messages.get(i + 1).is_some_and(|n| {
+                                n.sender == msg.sender && n.sender_is_self == msg.sender_is_self
+                            });
+                            ui.add_space(if next_same_group { 3.0 } else { 12.0 });
+                        }
+                    });
+
+                if just_opened {
+                    ui.scroll_to_cursor(Some(Align::BOTTOM));
+                }
+                if highlight_active {
+                    ui.ctx().request_repaint();
+                }
+            });
 
         if let Some(until) = fsm.data.highlight_until {
             if std::time::Instant::now() >= until {
@@ -657,8 +726,7 @@ impl TelegramPanel {
             } else {
                 Color32::TRANSPARENT
             };
-            ui.painter()
-                .rect_filled(rect, CornerRadius::same(8), fill);
+            ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
 
             let avatar = egui::Rect::from_center_size(
                 egui::pos2(
@@ -683,23 +751,15 @@ impl TelegramPanel {
             );
             text.spacing_mut().item_spacing.y = 2.0;
             text.add(
-                egui::Label::new(
-                    RichText::new(&dialog.name)
-                        .size(15.0)
-                        .color(C_TEXT),
-                )
-                .selectable(false)
-                .truncate(),
+                egui::Label::new(RichText::new(&dialog.name).size(15.0).color(C_TEXT))
+                    .selectable(false)
+                    .truncate(),
             );
             if let Some(preview) = &dialog.last_message {
                 text.add(
-                    egui::Label::new(
-                        RichText::new(preview)
-                            .size(12.5)
-                            .color(C_MUTED),
-                    )
-                    .selectable(false)
-                    .truncate(),
+                    egui::Label::new(RichText::new(preview).size(12.5).color(C_MUTED))
+                        .selectable(false)
+                        .truncate(),
                 );
             }
         }
@@ -736,7 +796,10 @@ impl TelegramPanel {
             let max_width = ui.available_width() * BUBBLE_MAX_WIDTH;
             egui::Frame::new()
                 .fill(fill)
-                .stroke(egui::Stroke::new(1.0, if is_me { C_ACCENT } else { C_BORDER2 }))
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    if is_me { C_ACCENT } else { C_BORDER2 },
+                ))
                 .corner_radius(CornerRadius::same(12))
                 .inner_margin(Margin::symmetric(12, 8))
                 .show(ui, |ui| {
@@ -786,11 +849,7 @@ impl TelegramPanel {
         show_titles: bool,
         compact: bool,
     ) -> bool {
-        let text_color = if is_me {
-            Color32::WHITE
-        } else {
-            C_TEXT
-        };
+        let text_color = if is_me { Color32::WHITE } else { C_TEXT };
         let secondary = Self::secondary_on(is_me, dark);
         let status_color = if is_me {
             Color32::from_white_alpha(0xDD)
@@ -957,12 +1016,7 @@ impl TelegramPanel {
             .inner_margin(Margin::symmetric(5, 2))
             .show(ui, |ui| {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                ui.label(
-                    RichText::new(label)
-                        .monospace()
-                        .size(10.5)
-                        .color(C_TEXT),
-                );
+                ui.label(RichText::new(label).monospace().size(10.5).color(C_TEXT));
             });
     }
 
@@ -1044,11 +1098,7 @@ impl TelegramPanel {
                 ui.spinner();
                 ui.add_space(10.0);
             }
-            ui.label(
-                RichText::new(message)
-                    .size(13.0)
-                    .color(C_MUTED),
-            );
+            ui.label(RichText::new(message).size(13.0).color(C_MUTED));
         });
     }
 
@@ -1061,11 +1111,7 @@ impl TelegramPanel {
         value: &mut String,
     ) -> egui::Response {
         let dark = true;
-        ui.label(
-            RichText::new(label)
-                .size(12.0)
-                .color(C_MUTED),
-        );
+        ui.label(RichText::new(label).size(12.0).color(C_MUTED));
         ui.add(
             egui::TextEdit::singleline(value)
                 .hint_text(hint)

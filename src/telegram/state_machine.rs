@@ -56,10 +56,7 @@ pub enum TelegramEvent {
     /// Search input changed.
     SearchInputChanged(String),
     /// A search result was selected.
-    SearchResultSelected {
-        peer: PeerRef,
-        msg_id: i32,
-    },
+    SearchResultSelected { peer: PeerRef, msg_id: i32 },
 }
 
 /// Data held by the Telegram state machine.
@@ -361,7 +358,8 @@ impl TelegramFsm {
                     .map(|d| d.name.clone());
                 self.data.search_target_message = Some(*msg_id);
                 self.data.highlight_message = Some(*msg_id);
-                self.data.highlight_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
+                self.data.highlight_until =
+                    Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
                 self.data.search_query.clear();
                 self.data.search_results.clear();
                 Transition(TelegramState::message_list())
@@ -467,7 +465,10 @@ pub fn ui_message_to_event(msg: &crate::telegram::UiMessage) -> Option<TelegramE
         UiMessage::Error(e) => TelegramEvent::Error(e.clone()),
         UiMessage::VideoError(e) => TelegramEvent::VideoError(e.clone()),
         UiMessage::VideoReady { .. } => TelegramEvent::VideoReady,
-        UiMessage::SearchResults { query, results } => TelegramEvent::SearchResults { query: query.clone(), results: results.clone() },
+        UiMessage::SearchResults { query, results } => TelegramEvent::SearchResults {
+            query: query.clone(),
+            results: results.clone(),
+        },
         UiMessage::ProxyReady { .. } => {
             // The UI uses the proxy port directly; no state change needed.
             return None;

@@ -23,6 +23,16 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::fonts::{icon_label, icon_label_colored, icon_only};
 use crate::style;
+
+// Redesign palette (mirrors docs/ui-redesign-reference.md)
+const C_TEXT: egui::Color32 = egui::Color32::from_rgb(0xf4, 0xf4, 0xf5);
+const C_TEXT2: egui::Color32 = egui::Color32::from_rgb(0xe4, 0xe4, 0xe7);
+const C_MUTED: egui::Color32 = egui::Color32::from_rgb(0xa1, 0xa1, 0xaa);
+const C_DIM: egui::Color32 = egui::Color32::from_rgb(0x71, 0x71, 0x7a);
+const C_RAISED: egui::Color32 = egui::Color32::from_rgb(0x1f, 0x1f, 0x26);
+const C_RAISED2: egui::Color32 = egui::Color32::from_rgb(0x22, 0x22, 0x2b);
+const C_BORDER2: egui::Color32 = egui::Color32::from_rgb(0x26, 0x26, 0x2e);
+const C_ACCENT: egui::Color32 = egui::Color32::from_rgb(0xf4, 0xf4, 0xf5);
 use crate::telegram::media_meta::{format_bytes, format_duration};
 use crate::telegram::state_machine::{TelegramData, TelegramEvent, TelegramFsm, TelegramState};
 use crate::telegram::{BgCommand, DialogInfo, MediaMeta, MessageInfo};
@@ -106,7 +116,7 @@ impl TelegramPanel {
     // ------------------------------------------------------------------ screens
 
     fn connecting_ui(&self, ui: &mut egui::Ui) {
-        let dark = style::is_dark(ui.ctx());
+        let dark = true;
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.35);
             ui.spinner();
@@ -114,7 +124,7 @@ impl TelegramPanel {
             ui.label(
                 RichText::new("Connecting to Telegram…")
                     .size(13.0)
-                    .color(style::text_secondary(dark)),
+                    .color(C_MUTED),
             );
         });
     }
@@ -125,14 +135,14 @@ impl TelegramPanel {
         fsm: &mut StateMachine<TelegramFsm>,
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
-        let dark = style::is_dark(ui.ctx());
+        let dark = true;
         ui.add_space(10.0);
         ui.label(RichText::new("Sign in").strong().size(17.0));
         ui.add_space(3.0);
         ui.label(
             RichText::new("Enter the phone number linked to your Telegram account.")
                 .size(12.5)
-                .color(style::text_secondary(dark)),
+                .color(C_MUTED),
         );
         ui.add_space(14.0);
 
@@ -175,14 +185,14 @@ impl TelegramPanel {
         fsm: &mut StateMachine<TelegramFsm>,
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
-        let dark = style::is_dark(ui.ctx());
+        let dark = true;
         ui.add_space(10.0);
         ui.label(RichText::new("Verification").strong().size(17.0));
         ui.add_space(3.0);
         ui.label(
             RichText::new("Enter the code Telegram sent to your app.")
                 .size(12.5)
-                .color(style::text_secondary(dark)),
+                .color(C_MUTED),
         );
         ui.add_space(14.0);
 
@@ -225,7 +235,7 @@ impl TelegramPanel {
         fsm: &mut StateMachine<TelegramFsm>,
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
-        let dark = style::is_dark(ui.ctx());
+        let dark = true;
         ui.add_space(10.0);
         ui.label(
             RichText::new("Two-factor authentication")
@@ -239,7 +249,7 @@ impl TelegramPanel {
             ui.label(
                 RichText::new(format!("Hint: {hint}"))
                     .size(12.5)
-                    .color(style::text_secondary(dark)),
+                    .color(C_MUTED),
             );
         }
         ui.add_space(14.0);
@@ -284,7 +294,7 @@ impl TelegramPanel {
     }
 
     fn error_ui(&self, ui: &mut egui::Ui, fsm: &mut StateMachine<TelegramFsm>) {
-        let dark = style::is_dark(ui.ctx());
+        let dark = true;
         ui.add_space(10.0);
         ui.label(RichText::new("Something went wrong").strong().size(17.0));
         ui.add_space(10.0);
@@ -380,7 +390,7 @@ impl TelegramPanel {
         fsm: &mut StateMachine<TelegramFsm>,
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
-        let dark = style::is_dark(ui.ctx());
+        let dark = true;
 
         // Header ------------------------------------------------------------
         let mut back = false;
@@ -451,13 +461,13 @@ impl TelegramPanel {
                                 ui.label(
                                     RichText::new(&msg.sender)
                                         .size(12.0)
-                                        .color(style::text_secondary(dark)),
+                                        .color(C_MUTED),
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     ui.label(
                                         RichText::new(&msg.time)
                                             .size(11.0)
-                                            .color(style::text_secondary(dark)),
+                                            .color(C_MUTED),
                                     );
                                 });
                             });
@@ -516,16 +526,16 @@ impl TelegramPanel {
         );
 
         if ui.is_rect_visible(rect) {
-            let dark = style::is_dark(ui.ctx());
+            let dark = true;
             let fill = if selected {
-                style::selected_fill()
+                C_RAISED2
             } else if response.hovered() {
-                style::hover_fill()
+                C_RAISED
             } else {
                 Color32::TRANSPARENT
             };
             ui.painter()
-                .rect_filled(rect, CornerRadius::same(style::CONTAINER_RADIUS), fill);
+                .rect_filled(rect, CornerRadius::same(8), fill);
 
             let avatar = egui::Rect::from_center_size(
                 egui::pos2(
@@ -553,7 +563,7 @@ impl TelegramPanel {
                 egui::Label::new(
                     RichText::new(&dialog.name)
                         .size(15.0)
-                        .color(style::text_primary(dark)),
+                        .color(C_TEXT),
                 )
                 .truncate(),
             );
@@ -562,7 +572,7 @@ impl TelegramPanel {
                     egui::Label::new(
                         RichText::new(preview)
                             .size(12.5)
-                            .color(style::text_secondary(dark)),
+                            .color(C_MUTED),
                     )
                     .truncate(),
                 );
@@ -584,9 +594,9 @@ impl TelegramPanel {
     ) -> bool {
         let is_me = msg.sender_is_self;
         let (fill, text_color) = if is_me {
-            (style::ACCENT, Color32::WHITE)
+            (C_ACCENT, Color32::WHITE)
         } else {
-            (style::bubble_other(dark), style::text_primary(dark))
+            (C_RAISED, C_TEXT)
         };
         let layout = if is_me {
             Layout::right_to_left(Align::TOP)
@@ -601,8 +611,8 @@ impl TelegramPanel {
             let max_width = ui.available_width() * BUBBLE_MAX_WIDTH;
             egui::Frame::new()
                 .fill(fill)
-                .stroke(egui::Stroke::new(1.0, style::bubble_stroke(is_me, dark)))
-                .corner_radius(CornerRadius::same(style::BUBBLE_RADIUS))
+                .stroke(egui::Stroke::new(1.0, C_BORDER2))
+                .corner_radius(CornerRadius::same(12))
                 .inner_margin(Margin::symmetric(12, 8))
                 .show(ui, |ui| {
                     // The Frame's content ui inherits the bubble's horizontal layout, so
@@ -654,16 +664,16 @@ impl TelegramPanel {
         let text_color = if is_me {
             Color32::WHITE
         } else {
-            style::text_primary(dark)
+            C_TEXT
         };
         let secondary = Self::secondary_on(is_me, dark);
         let status_color = if is_me {
             Color32::from_white_alpha(0xDD)
         } else {
             match status {
-                VideoStatus::Ready => style::status_ready(dark),
-                VideoStatus::Playing => style::ACCENT,
-                VideoStatus::Loading => style::text_secondary(dark),
+                VideoStatus::Ready => egui::Color32::from_rgb(0x22, 0xc5, 0x5e),
+                VideoStatus::Playing => C_ACCENT,
+                VideoStatus::Loading => C_MUTED,
             }
         };
         let mut play_clicked = false;
@@ -765,8 +775,8 @@ impl TelegramPanel {
                 Color32::from_white_alpha(0x48),
             )
         } else {
-            let accent = style::ACCENT;
-            if style::is_dark(ui.ctx()) {
+            let accent = C_ACCENT;
+            if true {
                 (
                     accent,
                     accent.gamma_multiply(1.15),
@@ -801,7 +811,7 @@ impl TelegramPanel {
             }
             ui.add(
                 egui::Button::new(text)
-                    .corner_radius(CornerRadius::same(style::WIDGET_RADIUS))
+                    .corner_radius(CornerRadius::same(6))
                     .min_size(min_size),
             )
         })
@@ -813,8 +823,8 @@ impl TelegramPanel {
     /// A rounded, bordered metadata chip (quality/encoding tag).
     fn chip(ui: &mut egui::Ui, label: &str, is_me: bool, dark: bool) {
         egui::Frame::new()
-            .fill(style::chip_fill(is_me, dark))
-            .stroke(egui::Stroke::new(1.0, style::chip_outline(is_me, dark)))
+            .fill(C_RAISED)
+            .stroke(egui::Stroke::new(1.0, C_BORDER2))
             .corner_radius(CornerRadius::same(6))
             .inner_margin(Margin::symmetric(7, 3))
             .show(ui, |ui| {
@@ -822,7 +832,7 @@ impl TelegramPanel {
                     RichText::new(label)
                         .monospace()
                         .size(10.5)
-                        .color(style::chip_text(is_me, dark)),
+                        .color(C_TEXT),
                 );
             });
     }
@@ -832,7 +842,7 @@ impl TelegramPanel {
         if on_accent {
             Color32::from_white_alpha(0xB8)
         } else {
-            style::text_secondary(dark)
+            C_MUTED
         }
     }
 
@@ -844,16 +854,16 @@ impl TelegramPanel {
         enabled: bool,
     ) -> egui::Response {
         let fill = if enabled {
-            style::ACCENT
+            C_ACCENT
         } else {
-            style::ACCENT.gamma_multiply(0.35)
+            C_ACCENT.gamma_multiply(0.35)
         };
         let width = ui.available_width();
         ui.add_enabled(
             enabled,
             egui::Button::new(icon_label_colored(ui, icon, label, Color32::WHITE))
                 .fill(fill)
-                .corner_radius(CornerRadius::same(style::WIDGET_RADIUS))
+                .corner_radius(CornerRadius::same(6))
                 .min_size(egui::vec2(width, 34.0)),
         )
     }
@@ -888,7 +898,7 @@ impl TelegramPanel {
         };
         egui::Frame::new()
             .fill(fill)
-            .corner_radius(CornerRadius::same(style::WIDGET_RADIUS))
+            .corner_radius(CornerRadius::same(6))
             .inner_margin(Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -898,7 +908,7 @@ impl TelegramPanel {
 
     /// Placeholder shown when a list has nothing in it (yet).
     fn empty_state(ui: &mut egui::Ui, message: &str, spinner: bool) {
-        let dark = style::is_dark(ui.ctx());
+        let dark = true;
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.3);
             if spinner {
@@ -908,7 +918,7 @@ impl TelegramPanel {
             ui.label(
                 RichText::new(message)
                     .size(13.0)
-                    .color(style::text_secondary(dark)),
+                    .color(C_MUTED),
             );
         });
     }
@@ -921,11 +931,11 @@ impl TelegramPanel {
         password: bool,
         value: &mut String,
     ) -> egui::Response {
-        let dark = style::is_dark(ui.ctx());
+        let dark = true;
         ui.label(
             RichText::new(label)
                 .size(12.0)
-                .color(style::text_secondary(dark)),
+                .color(C_MUTED),
         );
         ui.add(
             egui::TextEdit::singleline(value)

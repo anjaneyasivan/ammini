@@ -59,12 +59,8 @@ pub fn show(
                         clicked = true;
                     }
                     if clicked || response.clicked() {
-                        if *active_tab == id && *chats_open {
-                            *chats_open = false;
-                        } else {
-                            *active_tab = id;
-                            *chats_open = true;
-                        }
+                        *active_tab = id;
+                        *chats_open = true;
                         if id == "telegram" {
                             *show_telegram = true;
                         }

@@ -440,22 +440,26 @@ impl TelegramPanel {
                 .id_salt(("tg_messages", &chat_key))
                 .auto_shrink([false, false])
                 .stick_to_bottom(true)
-                .show(ui, |ui| {
-                    if fsm.data.has_more_messages {
-                        if Self::load_more_button(ui, "Load older messages").clicked() {
-                            load_older = true;
-                        }
-                        ui.add_space(8.0);
-                    }
-
+                .show_rows(ui, 90.0, {
+                    let msgs = &fsm.data.messages;
+                    msgs.len() + if fsm.data.has_more_messages { 1 } else { 0 }
+                }, |ui, row_range| {
+                    let has_more = fsm.data.has_more_messages;
                     let messages = &fsm.data.messages;
-                    for (i, msg) in messages.iter().enumerate() {
+                    for row in row_range {
+                        if has_more && row == 0 {
+                            if Self::load_more_button(ui, "Load older messages").clicked() {
+                                load_older = true;
+                            }
+                            ui.add_space(8.0);
+                            continue;
+                        }
+                        let i = if has_more { row - 1 } else { row };
+                        let Some(msg) = messages.get(i) else { continue; };
                         let is_me = msg.sender_is_self;
-                        // Group consecutive messages from one sender: name and time
-                        // appear only at the top of a group.
                         let starts_group = i == 0
-                            || messages[i - 1].sender != msg.sender
-                            || messages[i - 1].sender_is_self != is_me;
+                            || messages[i.saturating_sub(1)].sender != msg.sender
+                            || messages[i.saturating_sub(1)].sender_is_self != is_me;
                         if starts_group && !msg.sender.is_empty() {
                             ui.horizontal(|ui| {
                                 ui.label(
@@ -487,19 +491,16 @@ impl TelegramPanel {
                             play_msg = Some(msg.id);
                         }
 
-                        // Tight spacing inside a group, breathing room between groups.
                         let next_same_group = messages.get(i + 1).is_some_and(|n| {
                             n.sender == msg.sender && n.sender_is_self == msg.sender_is_self
                         });
                         ui.add_space(if next_same_group { 3.0 } else { 12.0 });
                     }
-
-                    if just_opened {
-                        // Land the newest message at the viewport bottom; clamps to
-                        // the real content bounds, so it can't leave bad offsets.
-                        ui.scroll_to_cursor(Some(Align::BOTTOM));
-                    }
                 });
+
+            if just_opened {
+                ui.scroll_to_cursor(Some(Align::BOTTOM));
+            }
         });
 
         if back {

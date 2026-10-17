@@ -38,11 +38,17 @@ pub fn show(
                                 v.widgets.hovered.bg_stroke = stroke;
                                 v.widgets.hovered.fg_stroke.color = txt_col;
                                 ui.add_sized(
-                                    egui::vec2(32.0, 32.0),
-                                    egui::Button::new(icon.rich_text().size(14.0).color(txt_col))
+                                    egui::vec2(36.0, 36.0),
+                                    egui::Button::new(icon.rich_text().size(16.0).color(txt_col))
                                         .fill(fill)
                                         .stroke(stroke),
                                 )
+                                .on_hover_text(match id {
+                                    "nav" => "Navigation rail",
+                                    "chat" => "Chats",
+                                    "insp" => "Inspector",
+                                    _ => "",
+                                })
                             })
                             .inner;
                         if btn.clicked() {

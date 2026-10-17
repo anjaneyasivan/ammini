@@ -321,7 +321,7 @@ impl TelegramPanel {
         // Header ------------------------------------------------------------
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            ui.add_space(2.0);
+            ui.add_space(12.0);
             ui.label(RichText::new("Chats").strong().size(18.0));
         });
         ui.add_space(8.0);

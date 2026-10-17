@@ -320,62 +320,6 @@ impl TelegramPanel {
         fsm: &mut StateMachine<TelegramFsm>,
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
-        // Header ------------------------------------------------------------
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.add_space(12.0);
-            // icon box
-            let (r, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), Sense::hover());
-            ui.painter().rect_filled(r, 4.0, C_RAISED);
-            ui.painter().text(r.center(), Align2::CENTER_CENTER, "R", FontId::proportional(12.0), C_TEXT);
-            ui.add_space(6.0);
-            ui.label(RichText::new("Ammini / Telegram").strong().size(12.0).color(C_TEXT));
-            ui.add_space(6.0);
-            // TDLib badge
-            let (r2, _) = ui.allocate_exact_size(egui::vec2(60.0, 16.0), Sense::hover());
-            ui.painter().rect_filled(r2, 3.0, C_RAISED);
-            ui.painter().rect_stroke(r2, 3.0, egui::Stroke::new(1.0, C_BORDER2), egui::StrokeKind::Inside);
-            ui.painter().text(r2.center(), Align2::CENTER_CENTER, "TDLib v1.8", FontId::monospace(9.0), C_MUTED);
-        });
-        ui.add_space(8.0);
-
-        // Connection status badge
-        ui.horizontal(|ui| {
-            ui.add_space(12.0);
-            let (r, _) = ui.allocate_exact_size(egui::vec2(70.0, 18.0), Sense::hover());
-            ui.painter().rect_filled(r, 4.0, C_CANVAS);
-            ui.painter().rect_stroke(r, 4.0, egui::Stroke::new(1.0, C_BORDER2), egui::StrokeKind::Inside);
-            let dot = egui::Rect::from_center_size(r.left_center() + egui::vec2(6.0, 0.0), egui::vec2(6.0, 6.0));
-            ui.painter().circle_filled(dot.center(), 3.0, egui::Color32::from_rgb(0x22, 0xc5, 0x5e));
-            ui.painter().text(r.center() + egui::vec2(4.0, 0.0), Align2::LEFT_CENTER, "Ready", FontId::monospace(10.0), egui::Color32::from_rgb(0x22, 0xc5, 0x5e));
-        });
-        ui.add_space(8.0);
-
-        // User profile bar
-        let profile_rect = ui.available_rect_before_wrap();
-        let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 24.0, 44.0), Sense::hover());
-        let r = r.translate(egui::vec2(12.0, 0.0));
-        ui.painter().rect_filled(r, 4.0, C_RAISED);
-        ui.painter().rect_stroke(r, 4.0, egui::Stroke::new(1.0, C_BORDER2), egui::StrokeKind::Inside);
-        // avatar
-        let avatar = egui::Rect::from_center_size(r.left_center() + egui::vec2(16.0, 0.0), egui::vec2(28.0, 28.0));
-        ui.painter().circle_filled(avatar.center(), 14.0, C_RAISED2);
-        ui.painter().text(avatar.center(), Align2::CENTER_CENTER, "A", FontId::proportional(12.0), C_TEXT);
-        // online dot
-        let odot = egui::Rect::from_center_size(avatar.right_bottom() + egui::vec2(-2.0, -2.0), egui::vec2(8.0, 8.0));
-        ui.painter().circle_filled(odot.center(), 4.0, egui::Color32::from_rgb(0x22, 0xc5, 0x5e));
-        ui.painter().circle_stroke(odot.center(), 4.0, egui::Stroke::new(1.0, C_SIDEBAR));
-        // name
-        ui.painter().text(egui::pos2(avatar.right() + 8.0, avatar.center().y - 6.0), Align2::LEFT_CENTER, "Anjaneya", FontId::proportional(12.0), C_TEXT);
-        ui.painter().text(egui::pos2(avatar.right() + 8.0, avatar.center().y + 8.0), Align2::LEFT_CENTER, "@anjaneya", FontId::monospace(10.0), C_MUTED);
-        // proxy badge
-        let badge = egui::Rect::from_center_size(r.right_center() + egui::vec2(-36.0, 0.0), egui::vec2(72.0, 16.0));
-        ui.painter().rect_filled(badge, 3.0, C_RAISED2);
-        ui.painter().rect_stroke(badge, 3.0, egui::Stroke::new(1.0, C_BORDER2), egui::StrokeKind::Inside);
-        ui.painter().text(badge.center(), Align2::CENTER_CENTER, "Proxy Active", FontId::monospace(9.0), C_MUTED);
-
-        ui.add_space(8.0);
-
         // Search input
         ui.horizontal(|ui| {
             ui.add_space(12.0);

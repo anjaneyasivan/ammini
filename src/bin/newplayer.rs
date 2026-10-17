@@ -546,7 +546,7 @@ impl App for NewPlayerApp {
         } else {
             self.hud_hover = None;
         }
-        let show_hud = is_paused || self.hud_hover.as_ref().map(|(t, _)| t.elapsed().as_secs_f32() < 3.0).unwrap_or(false);
+        let show_hud = (is_paused || self.hud_hover.as_ref().map(|(t, _)| t.elapsed().as_secs_f32() < 3.0).unwrap_or(false)) && !self.chats_open && !self.inspector_open;
         if show_hud {
             let hud_h = 70.0;
             egui::Area::new("hud".into()).fixed_pos(video_rect.min + egui::vec2(0.0, video_rect.height() - hud_h)).show(&ctx, |ui| {

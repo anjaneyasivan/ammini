@@ -465,6 +465,7 @@ pub fn ui_message_to_event(msg: &crate::telegram::UiMessage) -> Option<TelegramE
         UiMessage::Error(e) => TelegramEvent::Error(e.clone()),
         UiMessage::VideoError(e) => TelegramEvent::VideoError(e.clone()),
         UiMessage::VideoReady { .. } => TelegramEvent::VideoReady,
+        UiMessage::VideoRemoved { .. } => return None,
         UiMessage::SearchResults { query, results } => TelegramEvent::SearchResults {
             query: query.clone(),
             results: results.clone(),

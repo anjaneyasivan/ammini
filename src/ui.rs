@@ -48,6 +48,10 @@ impl App for AmminiApp {
                 UiMessage::VideoError(e) => {
                     self.telegram_fsm.handle(&TelegramEvent::VideoError(e));
                 }
+                UiMessage::VideoRemoved { msg_id } => {
+                    let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
+                    persistent.recent_telegram.retain(|e| e.msg_id != msg_id);
+                }
                 UiMessage::CacheCoverage {
                     msg_id,
                     total_bytes,

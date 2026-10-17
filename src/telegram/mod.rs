@@ -63,6 +63,11 @@ pub enum UiMessage {
         name: String,
     },
     VideoError(String),
+    /// A replayed Telegram video no longer exists in its message; the UI should drop
+    /// it from the recent list.
+    VideoRemoved {
+        msg_id: i32,
+    },
     Error(String),
     /// Published once per second by a background task while a Telegram video is
     /// cached: the byte ranges of `msg_id` that are present in the disk block cache,
@@ -619,6 +624,7 @@ async fn run_telegram(
                     }
                     Err(e) => {
                         tracing::warn!("telegram: replay msg_id={msg_id} failed: {e}");
+                        let _ = ui_tx.send(UiMessage::VideoRemoved { msg_id });
                         let _ =
                             ui_tx.send(UiMessage::VideoError(format!("Failed to load video: {e}")));
                     }

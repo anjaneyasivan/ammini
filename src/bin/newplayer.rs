@@ -615,7 +615,7 @@ impl App for NewPlayerApp {
         // Floating chats overlay (Telegram)
         if self.chats_open {
             let x = if self.nav_rail_open { 60.0 } else { 8.0 };
-            egui::Area::new("chats_overlay".into()).fixed_pos(egui::pos2(x, 40.0)).show(&ctx, |ui| {
+            let chats_resp = egui::Area::new("chats_overlay".into()).fixed_pos(egui::pos2(x, 40.0)).show(&ctx, |ui| {
                 egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(8.0).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
                     ui.set_width(300.0);
                     ui.set_min_height(ctx.viewport_rect().height() - 44.0);
@@ -624,12 +624,17 @@ impl App for NewPlayerApp {
                     self.telegram_panel.ui(ui, &mut self.telegram_fsm, &self.bg_tx);
                 });
             });
+            // dismiss on click outside
+            let clicked_outside = ctx.input(|i| i.pointer.any_click()) && ctx.input(|i| i.pointer.hover_pos().map(|p| !chats_resp.response.rect.contains(p)).unwrap_or(true));
+            if clicked_outside {
+                self.chats_open = false;
+            }
         }
 
         // Floating inspector overlay
         if self.inspector_open {
             let screen = ctx.viewport_rect();
-            egui::Area::new("inspector_overlay".into()).fixed_pos(egui::pos2(screen.width() - 296.0, 40.0)).show(&ctx, |ui| {
+            let insp_resp = egui::Area::new("inspector_overlay".into()).fixed_pos(egui::pos2(screen.width() - 296.0, 40.0)).show(&ctx, |ui| {
                 egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(8.0).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
                     ui.set_width(280.0);
                     ui.set_min_height(ctx.viewport_rect().height() - 44.0);
@@ -638,6 +643,10 @@ impl App for NewPlayerApp {
                     if let Ok(pos) = self.player_mut().time_pos() { ui.label(egui::RichText::new(format!("pos: {:.1}s", pos.unwrap_or(0.0))).monospace().size(11.0).color(C_MUTED)); }
                 });
             });
+            let clicked_outside = ctx.input(|i| i.pointer.any_click()) && ctx.input(|i| i.pointer.hover_pos().map(|p| !insp_resp.response.rect.contains(p)).unwrap_or(true));
+            if clicked_outside {
+                self.inspector_open = false;
+            }
         }
 
         // URL dialog

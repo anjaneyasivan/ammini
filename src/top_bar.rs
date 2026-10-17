@@ -22,7 +22,7 @@ pub fn show(
                     for (id, icon_bytes, on) in [
                         (
                             "nav",
-                            &include_bytes!("../assets/icons/newplayer/kl-layers-fill.svg")[..],
+                            &include_bytes!("../assets/icons/newplayer/kl-circle-menu-fill.svg")[..],
                             *nav_rail_open,
                         ),
                         (

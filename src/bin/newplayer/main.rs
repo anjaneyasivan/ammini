@@ -622,14 +622,14 @@ impl App for NewPlayerApp {
                         ui.horizontal(|ui| {
                             ui.add_space(8.0);
                             let playing = !is_paused;
-                            let play_icon_url = if playing {
-                                "https://api.iconify.design/material-symbols/pause.svg?color=%23ffffff&height=16"
+                            let play_icon_bytes: &[u8] = if playing {
+                                include_bytes!("../../../assets/icons/newplayer/pause.svg")
                             } else {
-                                "https://api.iconify.design/material-symbols/play-arrow.svg?color=%23ffffff&height=16"
+                                include_bytes!("../../../assets/icons/newplayer/play-arrow.svg")
                             };
                             if ui
                                 .add(
-                                    egui::Button::image(egui::Image::new(play_icon_url).fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                    egui::Button::image(egui::Image::from_bytes("play.svg", play_icon_bytes).fit_to_exact_size(egui::vec2(16.0, 16.0)))
                                         .fill(C_RAISED)
                                         .min_size(egui::vec2(32.0, 28.0)),
                                 )
@@ -639,7 +639,7 @@ impl App for NewPlayerApp {
                             }
                             if ui
                                 .add(
-                                    egui::Button::image(egui::Image::new("https://api.iconify.design/material-symbols/replay-10.svg?color=%23ffffff&height=16").fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                    egui::Button::image(egui::Image::from_bytes("replay-10.svg", include_bytes!("../../../assets/icons/newplayer/replay-10.svg")).fit_to_exact_size(egui::vec2(16.0, 16.0)))
                                         .fill(C_RAISED)
                                         .min_size(egui::vec2(28.0, 28.0)),
                                 )
@@ -649,7 +649,7 @@ impl App for NewPlayerApp {
                             }
                             if ui
                                 .add(
-                                    egui::Button::image(egui::Image::new("https://api.iconify.design/material-symbols/forward-10.svg?color=%23ffffff&height=16").fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                    egui::Button::image(egui::Image::from_bytes("forward-10.svg", include_bytes!("../../../assets/icons/newplayer/forward-10.svg")).fit_to_exact_size(egui::vec2(16.0, 16.0)))
                                         .fill(C_RAISED)
                                         .min_size(egui::vec2(28.0, 28.0)),
                                 )
@@ -686,14 +686,14 @@ impl App for NewPlayerApp {
                                 |ui| {
                                     let is_fullscreen =
                                         ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
-                                    let fs_icon_url = if is_fullscreen {
-                                        "https://api.iconify.design/material-symbols/fullscreen-exit.svg?color=%23ffffff&height=16"
+                                    let fs_icon_bytes = if is_fullscreen {
+                                        include_bytes!("../../../assets/icons/newplayer/fullscreen-exit.svg")
                                     } else {
-                                        "https://api.iconify.design/material-symbols/fullscreen.svg?color=%23ffffff&height=16"
+                                        include_bytes!("../../../assets/icons/newplayer/fullscreen.svg")
                                     };
                                     if ui
                                         .add(
-                                            egui::Button::image(egui::Image::new(fs_icon_url).fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                            egui::Button::image(egui::Image::from_bytes("fullscreen.svg", fs_icon_bytes).fit_to_exact_size(egui::vec2(16.0, 16.0)))
                                                 .fill(C_RAISED)
                                                 .min_size(egui::vec2(28.0, 28.0)),
                                         )
@@ -712,7 +712,7 @@ impl App for NewPlayerApp {
                                         .unwrap_or_else(|| "Subs".to_string());
                                     let subs_resp = ui.add(
                                         egui::Button::image_and_text(
-                                            egui::Image::new("https://api.iconify.design/material-symbols/subtitles.svg?color=%23ffffff&height=16")
+                                            egui::Image::from_bytes("subtitles.svg", include_bytes!("../../../assets/icons/newplayer/subtitles.svg"))
                                                 .fit_to_exact_size(egui::vec2(16.0, 16.0)),
                                             &sub_label,
                                         )
@@ -785,7 +785,7 @@ impl App for NewPlayerApp {
                                         .unwrap_or_else(|| "Audio".to_string());
                                     let audio_resp = ui.add(
                                         egui::Button::image_and_text(
-                                            egui::Image::new("https://api.iconify.design/ic/baseline-audiotrack.svg?color=%23ffffff&height=16")
+                                            egui::Image::from_bytes("audiotrack.svg", include_bytes!("../../../assets/icons/newplayer/audiotrack.svg"))
                                                 .fit_to_exact_size(egui::vec2(16.0, 16.0)),
                                             &audio_label,
                                         )

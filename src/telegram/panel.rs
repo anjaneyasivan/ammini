@@ -87,7 +87,7 @@ impl TelegramPanel {
         bg: &Option<UnboundedSender<BgCommand>>,
     ) {
         // Keep the Telegram scrollbars slim so they don't cover the chat/message content.
-        ui.style_mut().spacing.scrollbar_width = 4.0;
+        ui.style_mut().spacing.scroll.bar_width = 4.0;
         let state = fsm.state();
         match state {
             TelegramState::Connecting {} => self.connecting_ui(ui),

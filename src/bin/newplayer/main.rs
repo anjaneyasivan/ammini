@@ -620,15 +620,14 @@ impl App for NewPlayerApp {
             self.hud_hover = None;
         }
         let moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_down());
-        if moved || hovered {
+        if moved {
             self.last_input = std::time::Instant::now();
         }
         let menu_open = self.audio_menu_open || self.subs_menu_open;
         let hud_on = (!is_paused
-            && self.last_input.elapsed() < std::time::Duration::from_millis(2800))
+            && self.last_input.elapsed() < std::time::Duration::from_millis(4000))
             || is_paused
-            || menu_open
-            || hovered;
+            || menu_open;
         let show_hud = hud_on && !self.chats_open && !self.inspector_open;
         let hud_alpha = ctx.animate_bool_with_time(egui::Id::new("hud"), show_hud, 0.18);
         if !hud_on {

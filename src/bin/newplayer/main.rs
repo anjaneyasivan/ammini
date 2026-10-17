@@ -672,7 +672,7 @@ impl App for NewPlayerApp {
             mesh.add_triangle(0, 1, 2);
             mesh.add_triangle(0, 2, 3);
             ctx.layer_painter(egui::LayerId::new(
-                egui::Order::Tooltip,
+                egui::Order::Foreground,
                 egui::Id::new("hud_scrim"),
             ))
             .add(egui::Shape::mesh(mesh));

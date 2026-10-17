@@ -493,7 +493,6 @@ impl App for NewPlayerApp {
             egui::Panel::left("navrail").resizable(false).default_size(56.0).frame(egui::Frame::new().fill(C_RAIL)).show(ui, |ui| {
                 ui.set_width(56.0);
                 ui.vertical_centered(|ui| {
-                    ui.add_space(8.0);
                     let items = [("telegram","cib","telegram-plane"), ("subtitles","material-symbols-light","subtitles"), ("recent","material-symbols-light","history")];
                     for (id, pfx, name) in items {
                         let active = self.active_tab == id;

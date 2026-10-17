@@ -12,6 +12,7 @@ pub fn show(
     alpha: f32,
 ) {
     egui::Area::new("top_header".into())
+        .order(egui::Order::Tooltip)
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
             ui.set_opacity(alpha);

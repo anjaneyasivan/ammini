@@ -578,8 +578,14 @@ impl App for NewPlayerApp {
             );
         }
 
-        // Custom redesign HUD (auto-hide)
-        let video_rect = player_response.inner.rect;
+        // In fullscreen the SharkPlayer allocates a zero-size widget and renders into
+        // an overlay, so fall back to the whole content rect for HUD/scrim anchoring.
+        let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+        let video_rect = if is_fullscreen {
+            ctx.content_rect()
+        } else {
+            player_response.inner.rect
+        };
         let hovered = ctx
             .pointer_hover_pos()
             .map(|p| video_rect.contains(p) || p.y < 40.0)
@@ -655,7 +661,8 @@ impl App for NewPlayerApp {
                 color: bot_color,
             });
             mesh.indices.extend_from_slice(&[i, i + 1, i + 2, i, i + 2, i + 3]);
-            ui.painter().add(egui::Shape::mesh(mesh));
+            ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("hud_scrim")))
+                .add(egui::Shape::mesh(mesh));
         }
 
         if show_hud {
@@ -668,6 +675,7 @@ impl App for NewPlayerApp {
             let hud_left_margin = if self.nav_rail_open { 72.0 } else { 8.0 };
             let hud_w = (window_rect.width() - hud_left_margin).max(1.0);
             egui::Area::new("hud".into())
+                .order(egui::Order::Tooltip)
                 .fixed_pos(
                     egui::pos2(hud_left_margin, window_rect.max.y - hud_h - hud_bottom_padding),
                 )
@@ -829,6 +837,7 @@ impl App for NewPlayerApp {
                                     }
                                     if self.subs_menu_open {
                                         egui::Area::new("subs_menu".into())
+                                            .order(egui::Order::Tooltip)
                                             .pivot(egui::Align2::LEFT_BOTTOM)
                                             .fixed_pos(egui::pos2(
                                                 subs_btn_rect.left(),
@@ -907,6 +916,7 @@ impl App for NewPlayerApp {
                                     }
                                     if self.audio_menu_open {
                                         egui::Area::new("audio_menu".into())
+                                            .order(egui::Order::Tooltip)
                                             .pivot(egui::Align2::LEFT_BOTTOM)
                                             .fixed_pos(egui::pos2(
                                                 audio_btn_rect.left(),

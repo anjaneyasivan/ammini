@@ -71,3 +71,6 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # tracks — see vendor/egui-sharkplayer. Keep the patch minimal.
 [patch.crates-io]
 egui-sharkplayer = { path = "vendor/egui-sharkplayer" }
+
+[profile.release]
+debug = true

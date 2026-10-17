@@ -553,9 +553,8 @@ impl App for NewPlayerApp {
 
         events.push(PlayerEvent::Poll);
 
-        ctx.set_visuals(egui::Visuals::dark());
+        // Nav rail:
 
-        // Nav rail
         left_sidebar::show(
             ui,
             &ctx,

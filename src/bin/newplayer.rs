@@ -553,8 +553,7 @@ impl App for NewPlayerApp {
                 ui.set_min_size(egui::vec2(video_rect.width(), hud_h));
                 ui.set_max_size(egui::vec2(video_rect.width(), hud_h));
                 let local = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(video_rect.width(), hud_h));
-                let bg = ui.painter().rect_filled(local, 0.0, egui::Color32::from_black_alpha(180));
-                let _ = bg;
+                let _ = local;
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     // controls row
                     ui.horizontal(|ui| {
@@ -575,10 +574,12 @@ impl App for NewPlayerApp {
                         let pos_s = pos.floor() as i64;
                         let dur_s = dur.floor() as i64;
                         ui.label(egui::RichText::new(format!("{:02}:{:02} / {:02}:{:02}", pos_s / 60, pos_s % 60, dur_s / 60, dur_s % 60)).monospace().size(11.0).color(C_MUTED));
-                        let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
-                        if ui.add(egui::Button::new(if is_fullscreen { "⤓" } else { "⤢" }).fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
-                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+                            if ui.add(egui::Button::new(if is_fullscreen { ICON_FULLSCREEN_EXIT.rich_text().size(16.0) } else { ICON_FULLSCREEN.rich_text().size(16.0) }).fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+                            }
+                        });
                         ui.add_space(8.0);
                     });
                     // timeline
@@ -680,6 +681,12 @@ impl App for NewPlayerApp {
 // We'll add active_tab field via patch below.
 
 fn main() -> eframe::Result<()> {
+    std::panic::set_hook(Box::new(|info| {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/scratchpad/panic.log").unwrap();
+        writeln!(f, "PANIC: {info}").unwrap();
+        writeln!(f, "{}", std::backtrace::Backtrace::capture()).unwrap();
+    }));
     let options = NativeOptions {
         renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]),

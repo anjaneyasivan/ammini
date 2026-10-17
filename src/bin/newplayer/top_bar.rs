@@ -1,5 +1,5 @@
 //! Floating top action bar (navigation toggles) shown with the HUD.
-use crate::theme::{C_ACCENT, C_BORDER2, C_DIM, C_RAISED, C_RAISED2, C_TEXT};
+use crate::theme::{C_ACCENT, C_DIM, C_RAISED, C_RAISED2, C_TEXT};
 use eframe::egui;
 use egui_material_icons::icons::{ICON_INFO, ICON_LAYERS, ICON_MESSAGE};
 
@@ -30,6 +30,9 @@ pub fn show(
                         let btn = ui
                             .scope(|ui| {
                                 let v = &mut ui.style_mut().visuals;
+                                v.widgets.inactive.weak_bg_fill = fill;
+                                v.widgets.inactive.bg_fill = fill;
+                                v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
                                 v.widgets.hovered.weak_bg_fill = C_ACCENT.linear_multiply(0.15);
                                 v.widgets.hovered.bg_fill = C_ACCENT.linear_multiply(0.15);
                                 v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
@@ -37,7 +40,6 @@ pub fn show(
                                 ui.add_sized(
                                     egui::vec2(36.0, 36.0),
                                     egui::Button::new(icon.rich_text().size(16.0).color(txt_col))
-                                        .fill(fill)
                                         .stroke(egui::Stroke::NONE),
                                 )
                                 .on_hover_text(match id {

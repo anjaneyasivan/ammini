@@ -574,6 +574,30 @@ impl App for NewPlayerApp {
                         let dur = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
                         let pos_s = pos.floor() as i64;
                         let dur_s = dur.floor() as i64;
+                        // Audio track selector
+                        let audio_label = self.audio_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Audio".to_string());
+                        ui.menu_button(audio_label, |ui| {
+                            for t in self.audio_tracks.clone() {
+                                if ui.selectable_label(t.selected, &t.label).clicked() {
+                                    if let Ok(()) = self.player_mut().mpv().set_property("aid", t.id) {
+                                        for tr in &mut self.audio_tracks { tr.selected = tr.id == t.id; }
+                                    }
+                                    ui.close();
+                                }
+                            }
+                        });
+                        // Subtitle track selector
+                        let sub_label = self.subtitle_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Subs".to_string());
+                        ui.menu_button(sub_label, |ui| {
+                            for t in self.subtitle_tracks.clone() {
+                                if ui.selectable_label(t.selected, &t.label).clicked() {
+                                    if let Ok(()) = self.player_mut().mpv().set_property("sid", t.id) {
+                                        for tr in &mut self.subtitle_tracks { tr.selected = tr.id == t.id; }
+                                    }
+                                    ui.close();
+                                }
+                            }
+                        });
                         ui.label(egui::RichText::new(format!("{:02}:{:02} / {:02}:{:02}", pos_s / 60, pos_s % 60, dur_s / 60, dur_s % 60)).monospace().size(11.0).color(C_MUTED));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);

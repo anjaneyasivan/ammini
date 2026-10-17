@@ -401,27 +401,6 @@ impl TelegramPanel {
             ui.add_space(6.0);
         }
 
-        ui.separator();
-
-        // Footer (pinned) ----------------------------------------------------
-        let mut sign_out = false;
-        egui::Panel::bottom("tg_chats_footer")
-            .frame(egui::Frame::NONE)
-            .show(ui, |ui| {
-                ui.add_space(6.0);
-                ui.add_space(2.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(12.0);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.add_space(12.0);
-                        if Self::ghost_button(ui, ICON_LOGOUT, "Sign out").clicked() {
-                            sign_out = true;
-                        }
-                    });
-                });
-                ui.add_space(4.0);
-            });
-
         // Body (scrolls) -----------------------------------------------------
         let mut selected = None;
         let mut load_more = false;
@@ -530,9 +509,6 @@ impl TelegramPanel {
         }
         if load_more {
             Self::send(bg, BgCommand::LoadMoreDialogs);
-        }
-        if sign_out {
-            Self::send(bg, BgCommand::SignOut);
         }
     }
 

@@ -231,7 +231,6 @@ impl NewPlayerApp {
         let (bg_tx, ui_rx) = match TelegramConfig::from_env() {
             Ok(cfg) => {
                 let (tx, rx) = start(cfg);
-                eprintln!("[dbg] telegram started, bg_tx=Some");
                 (Some(tx), rx)
             }
             Err(e) => {
@@ -428,7 +427,6 @@ impl App for NewPlayerApp {
         let mut events = Vec::new();
 
         while let Ok(msg) = self.ui_rx.try_recv() {
-            eprintln!("[dbg] ui_msg: {msg:?}");
             match msg {
                 UiMessage::ProxyReady { port } => { *self.proxy_url_mut() = Some(format!("http://127.0.0.1:{port}")); }
                 UiMessage::VideoReady { msg_id, url, name } => {
@@ -811,7 +809,6 @@ impl App for NewPlayerApp {
             if close { self.show_url_dialog = false; self.url_input.clear(); }
         }
 
-        eprintln!("[dbg] dispatching {} events", events.len());
         for event in events {
             match event { PlayerEvent::Poll => trace!("poll"), _ => debug!("{event:?}") }
             self.fsm.handle(&event);

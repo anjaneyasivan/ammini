@@ -849,9 +849,14 @@ impl App for NewPlayerApp {
                                                                 for t in
                                                                     self.subtitle_tracks.clone()
                                                                 {
+                                                                    let label = if t.selected {
+                                                                        format!("✓ {}", t.label)
+                                                                    } else {
+                                                                        t.label.clone()
+                                                                    };
                                                                     if ui
                                                                         .selectable_label(
-                                                                            t.selected, &t.label,
+                                                                            t.selected, &label,
                                                                         )
                                                                         .clicked()
                                                                     {
@@ -916,9 +921,14 @@ impl App for NewPlayerApp {
                                                     .show(ui, |ui| {
                                                         ui.set_min_width(180.0);
                                                         for t in self.audio_tracks.clone() {
+                                                            let label = if t.selected {
+                                                                format!("✓ {}", t.label)
+                                                            } else {
+                                                                t.label.clone()
+                                                            };
                                                             if ui
                                                                 .selectable_label(
-                                                                    t.selected, &t.label,
+                                                                    t.selected, &label,
                                                                 )
                                                                 .clicked()
                                                             {

@@ -549,7 +549,8 @@ impl App for NewPlayerApp {
                             let fill = if on { C_RAISED2 } else { C_RAISED };
                             let stroke = if on { egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33,0x33,0x42)) } else { egui::Stroke::new(1.0, C_BORDER2) };
                             let txt_col = if on { C_TEXT } else { C_DIM };
-                            if ui.add(egui::Button::new(icon.rich_text().size(14.0).color(txt_col)).fill(fill).stroke(stroke).min_size(egui::vec2(24.0,24.0))).clicked() {
+                            let btn = ui.add_sized(egui::vec2(32.0, 32.0), egui::Button::new(icon.rich_text().size(14.0).color(txt_col)).fill(fill).stroke(stroke));
+                            if btn.clicked() {
                                 match id { "nav" => self.nav_rail_open = !self.nav_rail_open, "chat" => self.chats_open = !self.chats_open, "insp" => self.inspector_open = !self.inspector_open, _ => {} }
                             }
                         }

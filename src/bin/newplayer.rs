@@ -585,13 +585,20 @@ impl App for NewPlayerApp {
                         let dur_s = dur.floor() as i64;
                         // Audio track selector
                         let audio_label = self.audio_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Audio".to_string());
-                        if ui.add(egui::Button::new(icon_label(ui, ICON_AUDIOTRACK, &audio_label)).fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() {
+                        let audio_resp = ui.add(egui::Button::new(icon_label(ui, ICON_AUDIOTRACK, &audio_label)).fill(C_RAISED).min_size(egui::vec2(0.0,24.0)));
+                        let audio_btn_rect = audio_resp.rect;
+                        if audio_resp.clicked() {
+                            self.audio_menu_open = !self.audio_menu_open;
+                            self.subs_menu_open = false;
+                            if self.audio_menu_open { self.menu_opened_frame = self.frame_count; }
+                        }
+if ui.rect_contains_pointer(audio_btn_rect) && ctx.input(|i| i.pointer.primary_clicked()) {
                             self.audio_menu_open = !self.audio_menu_open;
                             self.subs_menu_open = false;
                             if self.audio_menu_open { self.menu_opened_frame = self.frame_count; }
                         }
                         if self.audio_menu_open {
-                            egui::Area::new("audio_menu".into()).fixed_pos(egui::pos2(120.0, 100.0)).show(&ctx, |ui| {
+                            egui::Area::new("audio_menu".into()).fixed_pos(egui::pos2(audio_btn_rect.left(), audio_btn_rect.bottom() + 4.0)).show(&ctx, |ui| {
                                 egui::Frame::new().fill(C_RAISED).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(6.0).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                                     ui.set_min_width(180.0);
                                     for t in self.audio_tracks.clone() {
@@ -607,23 +614,28 @@ impl App for NewPlayerApp {
                         }
                         // Subtitle track selector
                         let sub_label = self.subtitle_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Subs".to_string());
-                        if ui.add(egui::Button::new(icon_label(ui, ICON_SUBTITLES, &sub_label)).fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() {
+                        let subs_resp = ui.add(egui::Button::new(icon_label(ui, ICON_SUBTITLES, &sub_label)).fill(C_RAISED).min_size(egui::vec2(0.0,24.0)));
+                        let subs_btn_rect = subs_resp.rect;
+                        if subs_resp.clicked() {
                             self.subs_menu_open = !self.subs_menu_open;
                             self.audio_menu_open = false;
                             if self.subs_menu_open { self.menu_opened_frame = self.frame_count; }
                         }
                         if self.subs_menu_open {
-                            egui::Area::new("subs_menu".into()).fixed_pos(egui::pos2(120.0, 100.0)).show(&ctx, |ui| {
+                            egui::Area::new("subs_menu".into()).fixed_pos(egui::pos2(subs_btn_rect.left(), subs_btn_rect.bottom() + 4.0)).show(&ctx, |ui| {
                                 egui::Frame::new().fill(C_RAISED).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(6.0).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                                     ui.set_min_width(180.0);
-                                    for t in self.subtitle_tracks.clone() {
-                                        if ui.selectable_label(t.selected, &t.label).clicked() {
-                                            if let Ok(()) = self.player_mut().mpv().set_property("sid", t.id) {
-                                                for tr in &mut self.subtitle_tracks { tr.selected = tr.id == t.id; }
+                                    ui.set_max_height(240.0);
+                                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                                        for t in self.subtitle_tracks.clone() {
+                                            if ui.selectable_label(t.selected, &t.label).clicked() {
+                                                if let Ok(()) = self.player_mut().mpv().set_property("sid", t.id) {
+                                                    for tr in &mut self.subtitle_tracks { tr.selected = tr.id == t.id; }
+                                                }
+                                                self.subs_menu_open = false;
                                             }
-                                            self.subs_menu_open = false;
                                         }
-                                    }
+                                    });
                                 });
                             });
                         }

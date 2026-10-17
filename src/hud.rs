@@ -179,27 +179,19 @@ impl AmminiApp {
                                     .order(egui::Order::Tooltip)
                                     .fixed_pos(popup_rect.min)
                                     .show(ctx, |ui| {
-                                        egui::Frame {
-                                            fill: C_RAISED,
-                                            corner_radius: egui::CornerRadius::same(8),
-                                            inner_margin: egui::Margin::same(4),
-                                            ..Default::default()
+                                        ui.set_min_size(egui::vec2(popup_w, popup_h));
+                                        let mut vol =
+                                            self.player_mut().volume().unwrap_or(50.0) as f32;
+                                        if ui
+                                            .add(
+                                                egui::Slider::new(&mut vol, 0.0..=100.0)
+                                                    .vertical()
+                                                    .show_value(false),
+                                            )
+                                            .changed()
+                                        {
+                                            let _ = self.player_mut().set_volume(vol as f64);
                                         }
-                                        .show(ui, |ui| {
-                                            ui.set_min_size(egui::vec2(popup_w, popup_h));
-                                            let mut vol =
-                                                self.player_mut().volume().unwrap_or(50.0) as f32;
-                                            if ui
-                                                .add(
-                                                    egui::Slider::new(&mut vol, 0.0..=100.0)
-                                                        .vertical()
-                                                        .show_value(false),
-                                                )
-                                                .changed()
-                                            {
-                                                let _ = self.player_mut().set_volume(vol as f64);
-                                            }
-                                        });
                                     });
                             }
                             let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);

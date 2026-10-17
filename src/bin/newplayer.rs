@@ -188,6 +188,7 @@ struct NewPlayerApp {
     chats_open: bool,
     inspector_open: bool,
     icon_cache: Arc<Mutex<IconCache>>,
+    hud_hover: Option<(std::time::Instant, egui::Pos2)>,
 }
 
 impl NewPlayerApp {
@@ -262,6 +263,7 @@ impl NewPlayerApp {
             chats_open: true,
             inspector_open: true,
             icon_cache: IconCache::new_shared(),
+            hud_hover: None,
         };
         app.fsm.init();
         Ok(app)
@@ -534,9 +536,17 @@ impl App for NewPlayerApp {
 
         // Custom redesign HUD (auto-hide)
         let video_rect = player_response.rect;
-        let hovered = ui.rect_contains_pointer(video_rect);
+        let pointer = ctx.pointer_hover_pos();
+        let hovered = pointer.map(|p| video_rect.contains(p)).unwrap_or(false);
         let is_paused = self.player_mut().paused().unwrap_or(true);
-        let show_hud = hovered || is_paused;
+        if hovered {
+            if self.hud_hover.is_none_or(|(_, prev)| pointer.map(|p| p != prev).unwrap_or(true)) {
+                self.hud_hover = pointer.map(|p| (std::time::Instant::now(), p));
+            }
+        } else {
+            self.hud_hover = None;
+        }
+        let show_hud = is_paused || self.hud_hover.as_ref().map(|(t, _)| t.elapsed().as_secs_f32() < 3.0).unwrap_or(false);
         if show_hud {
             let hud_h = 70.0;
             egui::Area::new("hud".into()).fixed_pos(video_rect.min + egui::vec2(0.0, video_rect.height() - hud_h)).show(&ctx, |ui| {

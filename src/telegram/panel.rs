@@ -421,7 +421,8 @@ impl TelegramPanel {
                         let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 52.0), Sense::click());
                         ui.painter().rect_filled(rect, 4.0, if resp.hovered() { C_RAISED } else { Color32::TRANSPARENT });
                         ui.painter().text(rect.left_top() + egui::vec2(8.0, 6.0), Align2::LEFT_TOP, &res.chat_name, FontId::proportional(12.0), C_TEXT);
-                        ui.painter().text(rect.left_top() + egui::vec2(8.0, 24.0), Align2::LEFT_TOP, &res.snippet, FontId::monospace(10.0), C_MUTED);
+                        let snippet = if res.snippet.chars().count() > 46 { format!("{}…", res.snippet.chars().take(46).collect::<String>()) } else { res.snippet.clone() };
+                        ui.painter().text(rect.left_top() + egui::vec2(8.0, 24.0), Align2::LEFT_TOP, &snippet, FontId::monospace(10.0), C_MUTED);
                         if resp.clicked() {
                             selected = Some(res.peer);
                             unsafe { &mut fsm.inner_mut().data }.search_target_message = Some(res.message_id);

@@ -198,17 +198,6 @@ impl App for App2 {
         egui::Panel::top("toolbar").frame(egui::Frame::new().fill(C_TOOLBAR)).show(ui, |ui| {
             ui.set_height(40.0);
             ui.horizontal(|ui| {
-                // traffic lights
-                for c in [egui::Color32::from_rgb(0xff,0x5f,0x56),
-                          egui::Color32::from_rgb(0xff,0xbd,0x2e),
-                          egui::Color32::from_rgb(0x27,0xc9,0x3f)] {
-                    let (r, _) = ui.allocate_exact_size(egui::vec2(12.0,12.0), egui::Sense::click());
-                    ui.painter().circle_filled(r.center(), 6.0, c);
-                }
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("Ammini").strong().color(C_TEXT));
-                ui.label(egui::RichText::new("v2.5.0").monospace().size(10.0).color(C_DIM));
-                ui.add_space(8.0);
                 // server badge
                 let (r, _) = ui.allocate_exact_size(egui::vec2(150.0, 20.0), egui::Sense::hover());
                 ui.painter().rect_filled(r, 4.0, C_RAISED);

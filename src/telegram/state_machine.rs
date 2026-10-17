@@ -1,7 +1,7 @@
 use statig::prelude::*;
 use tracing::info;
 
-use crate::telegram::client::{DialogInfo, MessageInfo, PeerRef};
+use crate::telegram::client::{DialogInfo, MessageInfo, PeerRef, SearchResult};
 
 /// Events that drive the Telegram state machine.
 #[derive(Debug, Clone)]
@@ -48,6 +48,18 @@ pub enum TelegramEvent {
     VideoReady,
     /// A Telegram video failed to prepare.
     VideoError(String),
+    /// Search results arrived.
+    SearchResults {
+        query: String,
+        results: Vec<SearchResult>,
+    },
+    /// Search input changed.
+    SearchInputChanged(String),
+    /// A search result was selected.
+    SearchResultSelected {
+        peer: PeerRef,
+        msg_id: i32,
+    },
 }
 
 /// Data held by the Telegram state machine.
@@ -65,6 +77,10 @@ pub struct TelegramData {
     pub has_more_dialogs: bool,
     pub has_more_messages: bool,
     pub dialog_filter: String,
+    pub search_query: String,
+    pub search_results: Vec<SearchResult>,
+    pub search_loading: bool,
+    pub search_target_message: Option<i32>,
     pub loading_video: bool,
     pub current_video: Option<i32>,
 }
@@ -319,6 +335,33 @@ impl TelegramFsm {
                     .map(|d| d.name.clone());
                 Transition(TelegramState::message_list())
             }
+            TelegramEvent::SearchInputChanged(q) => {
+                self.data.search_query = q.clone();
+                self.data.search_loading = !q.trim().is_empty();
+                if q.trim().is_empty() {
+                    self.data.search_results.clear();
+                }
+                Handled
+            }
+            TelegramEvent::SearchResults { query, results } => {
+                self.data.search_query = query.clone();
+                self.data.search_results = results.clone();
+                self.data.search_loading = false;
+                Handled
+            }
+            TelegramEvent::SearchResultSelected { peer, msg_id } => {
+                self.data.selected_chat = Some(*peer);
+                self.data.selected_chat_name = self
+                    .data
+                    .dialogs
+                    .iter()
+                    .find(|d| d.peer_ref == *peer)
+                    .map(|d| d.name.clone());
+                self.data.search_target_message = Some(*msg_id);
+                self.data.search_query.clear();
+                self.data.search_results.clear();
+                Transition(TelegramState::message_list())
+            }
             TelegramEvent::MessageReceived { chat_id, message } => {
                 self.data.receive_message(*chat_id, (**message).clone());
                 Handled
@@ -420,6 +463,7 @@ pub fn ui_message_to_event(msg: &crate::telegram::UiMessage) -> Option<TelegramE
         UiMessage::Error(e) => TelegramEvent::Error(e.clone()),
         UiMessage::VideoError(e) => TelegramEvent::VideoError(e.clone()),
         UiMessage::VideoReady { .. } => TelegramEvent::VideoReady,
+        UiMessage::SearchResults { query, results } => TelegramEvent::SearchResults { query: query.clone(), results: results.clone() },
         UiMessage::ProxyReady { .. } => {
             // The UI uses the proxy port directly; no state change needed.
             return None;
@@ -438,7 +482,7 @@ mod tests {
     };
     use crate::telegram::MediaMeta;
     use crate::telegram::UiMessage;
-    use crate::telegram::client::{DialogInfo, MessageInfo, PeerRef};
+    use crate::telegram::client::{DialogInfo, MessageInfo, PeerRef, SearchResult};
     use grammers_session::types::{PeerAuth, PeerId};
     use statig::prelude::IntoStateMachineExt;
 

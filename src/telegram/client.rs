@@ -715,6 +715,14 @@ pub struct DialogInfo {
     pub last_message: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub peer: PeerRef,
+    pub chat_name: String,
+    pub message_id: i32,
+    pub snippet: String,
+}
+
 /// Information about a message.
 #[derive(Debug, Clone)]
 pub struct MessageInfo {

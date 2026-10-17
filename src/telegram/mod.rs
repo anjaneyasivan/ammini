@@ -45,6 +45,10 @@ pub enum UiMessage {
         has_more: bool,
         replace: bool,
     },
+    SearchResults {
+        query: String,
+        results: Vec<crate::telegram::client::SearchResult>,
+    },
     /// A new message arrived live on the account (from the updates listener). The UI
     /// appends it to the open chat when `chat_id` matches and refreshes the chat-list
     /// preview for that chat either way.
@@ -82,6 +86,7 @@ pub enum BgCommand {
     LoadMoreDialogs,
     SelectChat(PeerRef),
     LoadMoreMessages,
+    SearchChats(String),
     BackToChatList,
     PlayVideo(i32),
     /// Replay a recently played video by refetching its message (the registry may
@@ -506,6 +511,33 @@ async fn run_telegram(
                         }
                     }
                 }
+            }
+            BgCommand::SearchChats(query) => {
+                if query.trim().is_empty() {
+                    let _ = ui_tx.send(UiMessage::SearchResults { query, results: vec![] });
+                    continue;
+                }
+                let mut iter = client.clone_inner().search_all_messages().query(&query);
+                let mut results = Vec::new();
+                let mut seen_peers = std::collections::HashSet::new();
+                while let Ok(Some(msg)) = iter.next().await {
+                    if results.len() >= 20 { break; }
+                    let peer = match msg.peer() { Some(p) => p, None => continue };
+                    let peer_ref = match peer.to_ref().await { Ok(Some(r)) => r, _ => continue };
+                    let chat_name = peer.name().unwrap_or("Unknown").to_string();
+                    let snippet = msg.text().to_string();
+                    let key = format!("{:?}", peer_ref.id);
+                    if seen_peers.insert(key) {
+                        // still add this message as the representative
+                    }
+                    results.push(client::SearchResult {
+                        peer: peer_ref,
+                        chat_name,
+                        message_id: msg.id(),
+                        snippet,
+                    });
+                }
+                let _ = ui_tx.send(UiMessage::SearchResults { query, results });
             }
             BgCommand::BackToChatList => {
                 messages_iter = None;

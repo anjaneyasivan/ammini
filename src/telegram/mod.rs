@@ -525,7 +525,18 @@ async fn run_telegram(
                     let peer = match msg.peer() { Some(p) => p, None => continue };
                     let peer_ref = match peer.to_ref().await { Ok(Some(r)) => r, _ => continue };
                     let chat_name = peer.name().unwrap_or("Unknown").to_string();
-                    let snippet = msg.text().to_string();
+                    let snippet = if !msg.text().is_empty() {
+                        msg.text().to_string()
+                    } else if let Some(media) = msg.media() {
+                        match media {
+                            grammers_client::media::Media::Document(d) => {
+                                d.name().unwrap_or("Media").to_string()
+                            }
+                            _ => "Media".to_string(),
+                        }
+                    } else {
+                        "(no text)".to_string()
+                    };
                     let key = format!("{:?}", peer_ref.id);
                     if seen_peers.insert(key) {
                         // still add this message as the representative

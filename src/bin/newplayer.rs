@@ -681,7 +681,7 @@ impl App for NewPlayerApp {
         if self.chats_open {
             let x = if self.nav_rail_open { 60.0 } else { 8.0 };
             let chats_resp = egui::Area::new("chats_overlay".into()).fixed_pos(egui::pos2(x, 36.0)).show(&ctx, |ui| {
-                egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(0.0).inner_margin(egui::Margin { left: 8, right: 12, top: 2, bottom: 10 }).show(ui, |ui| {
+                egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(0.0).inner_margin(egui::Margin { left: 8, right: 12, top: 40, bottom: 10 }).show(ui, |ui| {
                     ui.set_width(300.0);
                     ui.set_min_height(ctx.viewport_rect().height() - 44.0);
                     ui.set_max_height(ctx.viewport_rect().height() - 44.0);

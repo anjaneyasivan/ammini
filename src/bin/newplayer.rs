@@ -573,6 +573,10 @@ impl App for NewPlayerApp {
                         let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
                         let dur = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
                         ui.label(egui::RichText::new(format!("{:.0}:{:02} / {:.0}:{:02}", pos/60.0, pos%60.0, dur/60.0, dur%60.0)).monospace().size(11.0).color(C_MUTED));
+                        let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+                        if ui.add(egui::Button::new(if is_fullscreen { "⤓" } else { "⤢" }).fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+                        }
                         ui.add_space(8.0);
                     });
                     // timeline
@@ -590,6 +594,7 @@ impl App for NewPlayerApp {
                     let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
                     let played_w = (pos / dur) as f32 * tl_rect.width();
                     painter.rect_filled(egui::Rect::from_min_size(tl_rect.min, egui::vec2(played_w, tl_rect.height())), 3.0, C_TEXT);
+                    if tl_resp.hovered() { ctx.set_cursor_icon(egui::CursorIcon::PointingHand); }
                     if tl_resp.clicked() || tl_resp.dragged() {
                         if let Some(p) = tl_resp.interact_pointer_pos() {
                             let frac = ((p.x - tl_rect.min.x) / tl_rect.width()).clamp(0.0, 1.0);

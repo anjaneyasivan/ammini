@@ -775,12 +775,12 @@ impl TelegramPanel {
                 Color32::from_white_alpha(0x48),
             )
         } else {
-            let accent = C_ACCENT;
+            let accent = egui::Color32::BLACK;
             if true {
                 (
                     accent,
-                    accent.gamma_multiply(1.15),
-                    accent.gamma_multiply(1.25),
+                    egui::Color32::from_gray(0x2a),
+                    egui::Color32::from_gray(0x3a),
                 )
             } else {
                 (

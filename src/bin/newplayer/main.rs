@@ -1070,10 +1070,10 @@ impl App for NewPlayerApp {
                         .stroke(egui::Stroke::new(1.0, C_BORDER2))
                         .corner_radius(0.0)
                         .inner_margin(egui::Margin {
-                            left: 0,
-                            right: 0,
-                            top: -4,
-                            bottom: 10,
+                            left: 12,
+                            right: 12,
+                            top: 8,
+                            bottom: 12,
                         })
                         .show(ui, |ui| {
                             ui.set_width(300.0);
@@ -1166,8 +1166,34 @@ impl App for NewPlayerApp {
                                 }
                                 "subtitles" => {
                                     ui.label(egui::RichText::new("Subtitle tracks").color(C_MUTED));
+                                    ui.add_space(6.0);
                                     for t in self.subtitle_tracks.clone() {
-                                        if ui.selectable_label(t.selected, &t.label).clicked() {
+                                        let label = if t.selected {
+                                            format!("✓ {}", t.label)
+                                        } else {
+                                            t.label.clone()
+                                        };
+                                        let (rect, resp) = ui.allocate_exact_size(
+                                            egui::vec2(ui.available_width(), 32.0),
+                                            egui::Sense::click(),
+                                        );
+                                        let hovered = resp.hovered();
+                                        let fill = if t.selected {
+                                            C_RAISED2
+                                        } else if hovered {
+                                            C_ACCENT.linear_multiply(0.15)
+                                        } else {
+                                            egui::Color32::TRANSPARENT
+                                        };
+                                        ui.painter().rect_filled(rect, 6.0, fill);
+                                        ui.painter().text(
+                                            rect.left_center() + egui::vec2(10.0, 0.0),
+                                            egui::Align2::LEFT_CENTER,
+                                            &label,
+                                            egui::FontId::proportional(13.0),
+                                            if t.selected { C_TEXT } else { C_MUTED },
+                                        );
+                                        if resp.clicked() {
                                             if let Ok(()) = self
                                                 .player_mut()
                                                 .mpv()
@@ -1178,6 +1204,7 @@ impl App for NewPlayerApp {
                                                 }
                                             }
                                         }
+                                        ui.add_space(4.0);
                                     }
                                 }
                                 "settings" => {

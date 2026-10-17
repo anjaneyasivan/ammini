@@ -269,130 +269,6 @@ impl App for App2 {
             });
         }
 
-        // Chats sidebar
-        if self.chats_open {
-            egui::Panel::left("chats").resizable(true).default_size(288.0).frame(egui::Frame::new().fill(C_SIDEBAR)).show(ui, |ui| {
-                // header
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("CHATS & FILES").monospace().size(11.0).strong().color(C_DIM));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(format!("{} active", MEDIA.len())).monospace().size(10.0).color(C_DIM));
-                    });
-                });
-                ui.add_space(4.0);
-                // search
-                ui.add(egui::TextEdit::singleline(&mut self.search_query).hint_text("Filter media...").desired_width(f32::INFINITY));
-                ui.add_space(4.0);
-                // filter tabs
-                ui.horizontal(|ui| {
-                    for f in ["All", "Movies", "Series"] {
-                        let active = self.active_filter == f;
-                        let fill = if active { C_RAISED2 } else { egui::Color32::TRANSPARENT };
-                        let col = if active { C_TEXT } else { C_DIM };
-                        if ui.add(egui::Button::new(f).fill(fill).min_size(egui::vec2(0.0,20.0))).clicked() {
-                            self.active_filter = f;
-                        }
-                        // color text
-                        let _ = col;
-                    }
-                });
-                ui.add_space(4.0);
-                hline(ui, C_BORDER2);
-                // list
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (i, m) in MEDIA.iter().enumerate() {
-                        let matches = m.filename.to_lowercase().contains(&self.search_query.to_lowercase())
-                            || m.channel.to_lowercase().contains(&self.search_query.to_lowercase())
-                            || m.title.to_lowercase().contains(&self.search_query.to_lowercase());
-                        let type_ok = self.active_filter == "All" || (self.active_filter == "Movies" && m.mtype == "Movies") || (self.active_filter == "Series" && m.mtype == "Series");
-                        if !(matches && type_ok) { continue; }
-                        let selected = self.selected == i;
-                        let bg = if selected { C_RAISED2 } else { egui::Color32::TRANSPARENT };
-                        let frame = egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(8, 6));
-                        frame.show(ui, |ui| {
-                            // channel + unread
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new(m.channel).size(12.0).color(if selected { C_TEXT } else { C_TEXT2 }).strong());
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if m.unread > 0 {
-                                        ui.label(egui::RichText::new(format!("{}", m.unread)).monospace().size(10.0).color(C_MUTED));
-                                    }
-                                });
-                            });
-                            ui.label(egui::RichText::new(m.filename).monospace().size(10.0).color(C_MUTED));
-                            ui.add_space(2.0);
-                            ui.horizontal(|ui| {
-                                for t in [m.quality, m.container] {
-                                    ui.label(egui::RichText::new(t).monospace().size(9.0).color(C_MUTED).background_color(C_RAISED));
-                                }
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(egui::RichText::new(m.size).monospace().size(10.0).color(C_DIM));
-                                });
-                            });
-                            // progress
-                            ui.add_space(2.0);
-                            let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 3.0), egui::Sense::hover());
-                            ui.painter().rect_filled(rect, 1.5, C_RAISED);
-                            let fillw = rect.width() * (m.progress as f32 / 100.0);
-                            let fillrect = egui::Rect::from_min_size(rect.min, egui::vec2(fillw, rect.height()));
-                            let fillcol = if m.progress == 100 { C_DIM } else { C_TEXT };
-                            ui.painter().rect_filled(fillrect, 1.5, fillcol);
-                            ui.label(egui::RichText::new(format!("{}%", m.progress)).monospace().size(9.0).color(C_DIM));
-                        });
-                        // click to select
-                        let r = ui.interact(ui.min_rect(), ui.make_persistent_id(m.id), egui::Sense::click());
-                        if r.clicked() { self.selected = i; }
-                        ui.add_space(2.0);
-                    }
-                });
-                // footer
-                hline(ui, C_BORDER2);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("●").color(egui::Color32::from_rgb(0x22,0xc5,0x5e)).size(10.0));
-                    ui.label(egui::RichText::new("Session Connected").monospace().size(10.0).color(C_DIM));
-                });
-            });
-        }
-
-        // Right inspector
-        if self.inspector_open {
-            egui::Panel::right("inspector").resizable(true).default_size(288.0).frame(egui::Frame::new().fill(C_SIDEBAR)).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("MEDIA INSPECTOR").monospace().size(11.0).strong().color(C_DIM));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("✕").clicked() { self.inspector_open = false; }
-                    });
-                });
-                hline(ui, C_BORDER2);
-                let m = &MEDIA[self.selected];
-                ui.label(egui::RichText::new(m.title).strong().color(C_TEXT));
-                ui.label(egui::RichText::new(m.subtitle).monospace().size(11.0).color(C_MUTED));
-                ui.add_space(4.0);
-                // spec table
-                for (k, v) in [("Codec", m.codec), ("Resolution", m.resolution), ("Container", m.container),
-                                ("Bitrate", m.bitrate), ("Framerate", m.fps), ("Resolution", m.resolution), ("Audio", m.audio_codec)] {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("{k}:")).monospace().size(11.0).color(C_DIM));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(egui::RichText::new(v).monospace().size(11.0).color(C_TEXT2).strong());
-                        });
-                    });
-                }
-                ui.add_space(6.0);
-                hline(ui, C_BORDER2);
-                ui.label(egui::RichText::new("TELEGRAM SOURCE").monospace().size(10.0).strong().color(C_DIM));
-                ui.add_space(2.0);
-                let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 52.0), egui::Sense::hover());
-                ui.painter().rect_filled(r, 6.0, C_RAISED);
-                ui.painter().text(r.min + egui::vec2(8.0,6.0), egui::Align2::LEFT_TOP, format!("Channel: {}", m.channel), egui::FontId::monospace(10.0), C_MUTED);
-                ui.painter().text(r.min + egui::vec2(8.0,24.0), egui::Align2::LEFT_TOP, format!("ID: {}", m.id), egui::FontId::monospace(10.0), C_DIM);
-                ui.add_space(8.0);
-                if ui.add(egui::Button::new("Copy Local Proxy Link").fill(C_RAISED).min_size(egui::vec2(ui.available_width(), 26.0))).clicked() {
-                    ctx.copy_text(format!("http://127.0.0.1:54941/telegram/{}", m.id));
-                }
-            });
-        }
-
         // Central viewport
         egui::CentralPanel::default().frame(egui::Frame::new().fill(C_VIEWPORT)).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -423,6 +299,98 @@ impl App for App2 {
             ui.add_space(4.0);
             let _ = iconify_icon(ui, &self.icon_cache, &ctx, "arcticons", "telegram", "#ffffff", 24);
         });
+
+        // Floating chats overlay (does not resize the viewport)
+        if self.chats_open {
+            let x = if self.nav_rail_open { 60.0 } else { 8.0 };
+            egui::Area::new("chats_overlay".into())
+                .fixed_pos(egui::pos2(x, 44.0))
+                .show(&ctx, |ui| {
+                    egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(8.0).show(ui, |ui| {
+                        ui.set_width(280.0);
+                        ui.set_max_height(520.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("CHATS & FILES").monospace().size(11.0).strong().color(C_DIM));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.small_button("✕").clicked() { self.chats_open = false; }
+                            });
+                        });
+                        ui.add(egui::TextEdit::singleline(&mut self.search_query).hint_text("Filter media...").desired_width(f32::INFINITY));
+                        ui.horizontal(|ui| {
+                            for f in ["All", "Movies", "Series"] {
+                                let active = self.active_filter == f;
+                                let fill = if active { C_RAISED2 } else { egui::Color32::TRANSPARENT };
+                                if ui.add(egui::Button::new(f).fill(fill).min_size(egui::vec2(0.0,20.0))).clicked() {
+                                    self.active_filter = f;
+                                }
+                            }
+                        });
+                        egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                            for (i, m) in MEDIA.iter().enumerate() {
+                                let matches = m.filename.to_lowercase().contains(&self.search_query.to_lowercase())
+                                    || m.channel.to_lowercase().contains(&self.search_query.to_lowercase())
+                                    || m.title.to_lowercase().contains(&self.search_query.to_lowercase());
+                                let type_ok = self.active_filter == "All"
+                                    || (self.active_filter == "Movies" && m.mtype == "Movies")
+                                    || (self.active_filter == "Series" && m.mtype == "Series");
+                                if !(matches && type_ok) { continue; }
+                                let selected = self.selected == i;
+                                let bg = if selected { C_RAISED2 } else { egui::Color32::TRANSPARENT };
+                                egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(8, 6)).show(ui, |ui| {
+                                    ui.label(egui::RichText::new(m.channel).size(12.0).color(if selected { C_TEXT } else { C_TEXT2 }).strong());
+                                    ui.label(egui::RichText::new(m.filename).monospace().size(10.0).color(C_MUTED));
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new(m.quality).monospace().size(9.0).color(C_MUTED));
+                                        ui.label(egui::RichText::new(m.container).monospace().size(9.0).color(C_MUTED));
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            ui.label(egui::RichText::new(m.size).monospace().size(10.0).color(C_DIM));
+                                        });
+                                    });
+                                });
+                                let r = ui.interact(ui.min_rect(), ui.make_persistent_id(m.id), egui::Sense::click());
+                                if r.clicked() { self.selected = i; }
+                                ui.add_space(2.0);
+                            }
+                        });
+                    });
+                });
+        }
+
+        // Floating inspector overlay
+        if self.inspector_open {
+            let screen = ctx.viewport_rect();
+            egui::Area::new("inspector_overlay".into())
+                .fixed_pos(egui::pos2(screen.width() - 296.0, 44.0))
+                .show(&ctx, |ui| {
+                    egui::Frame::new().fill(C_SIDEBAR).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(8.0).show(ui, |ui| {
+                        ui.set_width(280.0);
+                        ui.set_max_height(520.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("MEDIA INSPECTOR").monospace().size(11.0).strong().color(C_DIM));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.small_button("✕").clicked() { self.inspector_open = false; }
+                            });
+                        });
+                        let m = &MEDIA[self.selected];
+                        ui.label(egui::RichText::new(m.title).strong().color(C_TEXT));
+                        ui.label(egui::RichText::new(m.subtitle).monospace().size(11.0).color(C_MUTED));
+                        ui.add_space(4.0);
+                        for (k, v) in [("Codec", m.codec), ("Resolution", m.resolution), ("Container", m.container),
+                                        ("Bitrate", m.bitrate), ("Framerate", m.fps), ("Audio", m.audio_codec)] {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(format!("{k}:")).monospace().size(11.0).color(C_DIM));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(egui::RichText::new(v).monospace().size(11.0).color(C_TEXT2).strong());
+                                });
+                            });
+                        }
+                        ui.add_space(6.0);
+                        if ui.add(egui::Button::new("Copy Local Proxy Link").fill(C_RAISED).min_size(egui::vec2(ui.available_width(), 26.0))).clicked() {
+                            ctx.copy_text(format!("http://127.0.0.1:54941/telegram/{}", m.id));
+                        }
+                    });
+                });
+        }
     }
 }
 

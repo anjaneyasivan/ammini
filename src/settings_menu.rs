@@ -9,7 +9,7 @@ impl AmminiApp {
             return;
         }
         let window_rect = ctx.viewport_rect();
-        egui::Area::new("settings_menu".into())
+        let menu_resp = egui::Area::new("settings_menu".into())
             .order(egui::Order::Tooltip)
             .fixed_pos(egui::pos2(8.0, window_rect.max.y - 160.0))
             .show(ctx, |ui| {
@@ -40,8 +40,8 @@ impl AmminiApp {
                         ui.put(
                             icon_rect,
                             egui::Image::from_bytes(
-                                "logout.svg",
-                                include_bytes!("../assets/icons/newplayer/logout.svg"),
+                                "kl-logout.svg",
+                                include_bytes!("../assets/icons/newplayer/kl-logout.svg"),
                             )
                             .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                         );
@@ -81,8 +81,8 @@ impl AmminiApp {
                         ui.put(
                             icon_rect,
                             egui::Image::from_bytes(
-                                "info.svg",
-                                include_bytes!("../assets/icons/newplayer/info.svg"),
+                                "kl-info.svg",
+                                include_bytes!("../assets/icons/newplayer/kl-info.svg"),
                             )
                             .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                         );
@@ -102,5 +102,15 @@ impl AmminiApp {
                         }
                     });
             });
+        let clicked_outside = ctx.input(|i| i.pointer.any_click())
+            && ctx.input(|i| {
+                let pos = i.pointer.hover_pos().unwrap_or_default();
+                let in_menu = menu_resp.response.rect.contains(pos);
+                let in_icon = pos.x < 60.0 && pos.y > window_rect.max.y - 60.0;
+                !in_menu && !in_icon
+            });
+        if clicked_outside {
+            self.settings_menu_open = false;
+        }
     }
 }

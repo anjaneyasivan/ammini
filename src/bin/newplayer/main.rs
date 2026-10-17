@@ -688,9 +688,9 @@ impl App for NewPlayerApp {
                             };
                             if ui
                                 .add(
-                                    egui::Button::image(egui::Image::from_bytes("play.svg", play_icon_bytes).fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                    egui::Button::image(egui::Image::from_bytes("play.svg", play_icon_bytes).fit_to_exact_size(egui::vec2(18.0, 18.0)))
                                         .fill(C_RAISED)
-                                        .min_size(egui::vec2(32.0, 28.0)),
+                                        .min_size(egui::vec2(36.0, 36.0)),
                                 )
                                 .clicked()
                             {
@@ -698,9 +698,9 @@ impl App for NewPlayerApp {
                             }
                             if ui
                                 .add(
-                                    egui::Button::image(egui::Image::from_bytes("replay-10.svg", include_bytes!("../../../assets/icons/newplayer/replay-10.svg")).fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                    egui::Button::image(egui::Image::from_bytes("replay-10.svg", include_bytes!("../../../assets/icons/newplayer/replay-10.svg")).fit_to_exact_size(egui::vec2(18.0, 18.0)))
                                         .fill(C_RAISED)
-                                        .min_size(egui::vec2(28.0, 28.0)),
+                                        .min_size(egui::vec2(36.0, 36.0)),
                                 )
                                 .clicked()
                             {
@@ -708,9 +708,9 @@ impl App for NewPlayerApp {
                             }
                             if ui
                                 .add(
-                                    egui::Button::image(egui::Image::from_bytes("forward-10.svg", include_bytes!("../../../assets/icons/newplayer/forward-10.svg")).fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                    egui::Button::image(egui::Image::from_bytes("forward-10.svg", include_bytes!("../../../assets/icons/newplayer/forward-10.svg")).fit_to_exact_size(egui::vec2(18.0, 18.0)))
                                         .fill(C_RAISED)
-                                        .min_size(egui::vec2(28.0, 28.0)),
+                                        .min_size(egui::vec2(36.0, 36.0)),
                                 )
                                 .clicked()
                             {
@@ -752,9 +752,9 @@ impl App for NewPlayerApp {
                                     };
                                     if ui
                                         .add(
-                                            egui::Button::image(egui::Image::from_bytes("fullscreen.svg", fs_icon_bytes).fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                            egui::Button::image(egui::Image::from_bytes("fullscreen.svg", fs_icon_bytes).fit_to_exact_size(egui::vec2(18.0, 18.0)))
                                                 .fill(C_RAISED)
-                                                .min_size(egui::vec2(28.0, 28.0)),
+                                                .min_size(egui::vec2(36.0, 36.0)),
                                         )
                                         .clicked()
                                     {
@@ -772,11 +772,11 @@ impl App for NewPlayerApp {
                                     let subs_resp = ui.add(
                                         egui::Button::image_and_text(
                                             egui::Image::from_bytes("subtitles.svg", include_bytes!("../../../assets/icons/newplayer/subtitles.svg"))
-                                                .fit_to_exact_size(egui::vec2(16.0, 16.0)),
+                                                .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                                             &sub_label,
                                         )
                                         .fill(C_RAISED)
-                                        .min_size(egui::vec2(0.0, 24.0)),
+                                        .min_size(egui::vec2(0.0, 36.0)),
                                     );
                                     let subs_btn_rect = subs_resp.rect;
                                     if subs_resp.clicked() {
@@ -845,11 +845,11 @@ impl App for NewPlayerApp {
                                     let audio_resp = ui.add(
                                         egui::Button::image_and_text(
                                             egui::Image::from_bytes("audiotrack.svg", include_bytes!("../../../assets/icons/newplayer/audiotrack.svg"))
-                                                .fit_to_exact_size(egui::vec2(16.0, 16.0)),
+                                                .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                                             &audio_label,
                                         )
                                         .fill(C_RAISED)
-                                        .min_size(egui::vec2(0.0, 24.0)),
+                                        .min_size(egui::vec2(0.0, 36.0)),
                                     );
                                     let audio_btn_rect = audio_resp.rect;
                                     if audio_resp.clicked() {

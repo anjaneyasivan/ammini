@@ -40,8 +40,8 @@ impl AmminiApp {
                         ui.put(
                             icon_rect,
                             egui::Image::from_bytes(
-                                "kl-logout.svg",
-                                include_bytes!("../assets/icons/newplayer/kl-logout.svg"),
+                                "kl-log-out-fill.svg",
+                                include_bytes!("../assets/icons/newplayer/kl-log-out-fill.svg"),
                             )
                             .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                         );
@@ -81,8 +81,8 @@ impl AmminiApp {
                         ui.put(
                             icon_rect,
                             egui::Image::from_bytes(
-                                "kl-info.svg",
-                                include_bytes!("../assets/icons/newplayer/kl-info.svg"),
+                                "kl-info-fill.svg",
+                                include_bytes!("../assets/icons/newplayer/kl-info-fill.svg"),
                             )
                             .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                         );

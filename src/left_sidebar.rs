@@ -27,9 +27,9 @@ pub fn show(
             ui.set_width(56.0);
             ui.vertical_centered(|ui| {
                 let items = [
-                    ("telegram", "cib", "telegram-plane"),
-                    ("subtitles", "material-symbols-light", "subtitles"),
-                    ("recent", "material-symbols-light", "history"),
+                    ("telegram", "keyline-icons", "send-fill"),
+                    ("subtitles", "keyline-icons", "subtitles-fill"),
+                    ("recent", "keyline-icons", "history-fill"),
                 ];
                 for (id, pfx, name) in items {
                     let active = *active_tab == id;
@@ -78,8 +78,8 @@ pub fn show(
                     ui,
                     icon_cache,
                     ctx,
-                    "material-symbols",
-                    "settings",
+                    "keyline-icons",
+                    "settings-fill",
                     "#ffffff",
                     20,
                     None,

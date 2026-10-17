@@ -51,7 +51,7 @@ pub fn show(
                                 ui.add_sized(
                                     egui::vec2(36.0, 36.0),
                                     egui::Button::image(
-                                        egui::Image::from_bytes("icon.svg", icon_bytes)
+                                        egui::Image::from_bytes(format!("{id}.svg"), icon_bytes)
                                             .fit_to_exact_size(egui::vec2(16.0, 16.0)),
                                     )
                                     .stroke(egui::Stroke::NONE),

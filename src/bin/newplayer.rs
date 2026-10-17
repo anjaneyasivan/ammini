@@ -550,7 +550,7 @@ impl App for NewPlayerApp {
 
         // Custom redesign HUD (auto-hide)
         let video_rect = player_response.rect;
-        let hovered = ui.rect_contains_pointer(video_rect);
+        let hovered = ctx.pointer_hover_pos().map(|p| video_rect.contains(p)).unwrap_or(false);
         let is_paused = self.player_mut().paused().unwrap_or(true);
         if hovered {
             if let Some(pos) = ctx.pointer_hover_pos() {
@@ -558,7 +558,7 @@ impl App for NewPlayerApp {
                     self.hud_hover = Some((std::time::Instant::now(), pos));
                 }
             }
-        } else if !ui.rect_contains_pointer(egui::Rect::from_min_size(video_rect.min + egui::vec2(0.0, video_rect.height() - 70.0), egui::vec2(video_rect.width(), 70.0))) {
+        } else {
             self.hud_hover = None;
         }
         let show_hud = (is_paused || self.hud_hover.as_ref().map(|(t, _)| t.elapsed().as_secs_f32() < 3.0).unwrap_or(false) || self.audio_menu_open || self.subs_menu_open) && !self.chats_open && !self.inspector_open;

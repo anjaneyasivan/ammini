@@ -21,169 +21,17 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, info, trace};
 
-// ---------------------------------------------------------------------------
-// Color palette (from redesign)
-// ---------------------------------------------------------------------------
-const C_WINDOW: egui::Color32 = egui::Color32::from_rgb(0x0e, 0x0e, 0x11);
-const C_TOOLBAR: egui::Color32 = egui::Color32::from_rgb(0x16, 0x16, 0x1a);
-const C_RAIL: egui::Color32 = egui::Color32::from_rgb(0x11, 0x11, 0x14);
-const C_SIDEBAR: egui::Color32 = egui::Color32::from_rgb(0x12, 0x12, 0x15);
-const C_VIEWPORT: egui::Color32 = egui::Color32::from_rgb(0x08, 0x08, 0x0a);
-const C_CANVAS: egui::Color32 = egui::Color32::from_rgb(0x05, 0x05, 0x07);
-const C_RAISED: egui::Color32 = egui::Color32::from_rgb(0x1f, 0x1f, 0x26);
-const C_RAISED2: egui::Color32 = egui::Color32::from_rgb(0x22, 0x22, 0x2b);
-const C_BORDER2: egui::Color32 = egui::Color32::from_rgb(0x26, 0x26, 0x2e);
-const C_TEXT: egui::Color32 = egui::Color32::from_rgb(0xf4, 0xf4, 0xf5);
-const C_TEXT2: egui::Color32 = egui::Color32::from_rgb(0xe4, 0xe4, 0xe7);
-const C_MUTED: egui::Color32 = egui::Color32::from_rgb(0xa1, 0xa1, 0xaa);
-const C_DIM: egui::Color32 = egui::Color32::from_rgb(0x71, 0x71, 0x7a);
+mod iconify;
+mod left_sidebar;
+mod right_sidebar;
+mod theme;
+mod top_bar;
+
+use crate::theme::*;
+use iconify::IconCache;
 
 const APP_KEY: &str = "min_mpv_state";
 const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
-
-// ---------------------------------------------------------------------------
-// Iconify icon cache
-// ---------------------------------------------------------------------------
-#[derive(Clone)]
-#[allow(dead_code)]
-enum IconState {
-    Loading,
-    Ready(Vec<u8>),
-    Failed(String),
-}
-
-struct IconCache {
-    dir: std::path::PathBuf,
-    entries: HashMap<String, IconState>,
-}
-
-impl IconCache {
-    fn new() -> Self {
-        let dir = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("newplayer_icon_cache");
-        let _ = std::fs::create_dir_all(&dir);
-        Self {
-            dir,
-            entries: HashMap::new(),
-        }
-    }
-    fn new_shared() -> Arc<Mutex<Self>> {
-        Arc::new(Mutex::new(Self::new()))
-    }
-    fn key(prefix: &str, name: &str, color: &str, size: u32) -> String {
-        format!("{prefix}_{name}_{color}_{size}").replace(
-            ['/', '\\', ':', '*', '?', '"', '<', '>', '|', '#', '%'],
-            "_",
-        )
-    }
-    fn cache_path(&self, key: &str) -> std::path::PathBuf {
-        self.dir.join(format!("{key}.svg"))
-    }
-    fn state(
-        &mut self,
-        ctx: &egui::Context,
-        prefix: &str,
-        name: &str,
-        color: &str,
-        size: u32,
-    ) -> IconState {
-        let key = Self::key(prefix, name, color, size);
-        if let Some(st) = self.entries.get(&key).cloned() {
-            match st {
-                IconState::Ready(b) => return IconState::Ready(b),
-                IconState::Failed(e) => return IconState::Failed(e),
-                IconState::Loading => {
-                    let path = self.cache_path(&key);
-                    if let Ok(bytes) = std::fs::read(&path) {
-                        if !bytes.is_empty() {
-                            self.entries.insert(key, IconState::Ready(bytes.clone()));
-                            return IconState::Ready(bytes);
-                        }
-                    }
-                    return IconState::Loading;
-                }
-            }
-        }
-        let path = self.cache_path(&key);
-        if let Ok(bytes) = std::fs::read(&path) {
-            if !bytes.is_empty() {
-                self.entries
-                    .insert(key.clone(), IconState::Ready(bytes.clone()));
-                return IconState::Ready(bytes);
-            }
-        }
-        self.entries.insert(key.clone(), IconState::Loading);
-        let ctx = ctx.clone();
-        let cache_dir = self.dir.clone();
-        let url = format!(
-            "https://api.iconify.design/{prefix}/{name}.svg?color={color}&height={size}",
-            color = color.replace('#', "%23")
-        );
-        let key2 = key.clone();
-        std::thread::spawn(move || {
-            let out = std::process::Command::new("curl")
-                .args(["-sS", "-L", &url])
-                .output();
-            if let Ok(o) = out {
-                if o.status.success() && !o.stdout.is_empty() {
-                    let _ = std::fs::write(cache_dir.join(format!("{key2}.svg")), &o.stdout);
-                }
-            }
-            ctx.request_repaint();
-        });
-        IconState::Loading
-    }
-}
-
-fn iconify_icon(
-    ui: &mut egui::Ui,
-    cache: &Arc<Mutex<IconCache>>,
-    ctx: &egui::Context,
-    prefix: &str,
-    name: &str,
-    color: &str,
-    size: u32,
-    bg: Option<egui::Color32>,
-) -> bool {
-    let state = {
-        let mut c = cache.lock().unwrap();
-        c.state(ctx, prefix, name, color, size)
-    };
-    let desired = egui::vec2(size as f32, size as f32);
-    let mut clicked = false;
-    match state {
-        IconState::Ready(bytes) => {
-            let image = egui::Image::from_bytes(format!("{prefix}_{name}.svg"), bytes)
-                .max_size(desired)
-                .fit_to_original_size(1.0);
-            let mut btn = egui::Button::image(image).min_size(desired + egui::vec2(8.0, 8.0));
-            if let Some(b) = bg {
-                btn = btn.fill(b).corner_radius(egui::CornerRadius::same(100));
-            } else {
-                btn = btn.frame(false);
-            }
-            let btn = ui.add(btn);
-            clicked = btn.clicked();
-        }
-        IconState::Failed(_) => {
-            let btn = ui.add(egui::Button::new("!").min_size(desired + egui::vec2(8.0, 8.0)));
-            clicked = btn.clicked();
-        }
-        IconState::Loading => {
-            let (rect, _) =
-                ui.allocate_exact_size(desired + egui::vec2(8.0, 8.0), egui::Sense::click());
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "…",
-                egui::FontId::proportional(16.0),
-                C_DIM,
-            );
-        }
-    }
-    clicked
-}
 
 // ---------------------------------------------------------------------------
 // Material icons for sharkplayer control bar
@@ -716,69 +564,15 @@ impl App for NewPlayerApp {
         ctx.set_visuals(egui::Visuals::dark());
 
         // Nav rail
-        if self.nav_rail_open {
-            egui::Panel::left("navrail")
-                .resizable(false)
-                .default_size(56.0)
-                .frame(egui::Frame::new().fill(C_RAIL))
-                .show(ui, |ui| {
-                    ui.set_width(56.0);
-                    ui.vertical_centered(|ui| {
-                        let items = [
-                            ("telegram", "cib", "telegram-plane"),
-                            ("subtitles", "material-symbols-light", "subtitles"),
-                            ("recent", "material-symbols-light", "history"),
-                        ];
-                        for (id, pfx, name) in items {
-                            let active = self.active_tab == id;
-                            let fill = if active {
-                                C_RAISED2
-                            } else {
-                                egui::Color32::TRANSPARENT
-                            };
-                            let _ = fill;
-                            let frame = egui::Frame::new()
-                                .fill(if active {
-                                    C_RAISED2
-                                } else {
-                                    egui::Color32::TRANSPARENT
-                                })
-                                .stroke(if active {
-                                    egui::Stroke::new(
-                                        1.0,
-                                        egui::Color32::from_rgb(0x33, 0x33, 0x42),
-                                    )
-                                } else {
-                                    egui::Stroke::NONE
-                                })
-                                .inner_margin(egui::Margin::same(8));
-                            frame.show(ui, |ui| {
-                                if iconify_icon(
-                                    ui,
-                                    &self.icon_cache,
-                                    &ctx,
-                                    pfx,
-                                    name,
-                                    "#ffffff",
-                                    20,
-                                    None,
-                                ) {
-                                    if self.active_tab == id && self.chats_open {
-                                        self.chats_open = false;
-                                    } else {
-                                        self.active_tab = id;
-                                        self.chats_open = true;
-                                    }
-                                    if id == "telegram" {
-                                        self.show_telegram = true;
-                                    }
-                                }
-                            });
-                            ui.add_space(4.0);
-                        }
-                    });
-                });
-        }
+        left_sidebar::show(
+            ui,
+            &ctx,
+            &self.icon_cache,
+            self.nav_rail_open,
+            &mut self.active_tab,
+            &mut self.chats_open,
+            &mut self.show_telegram,
+        );
 
         // Central viewport with SharkPlayer (HUD disabled; custom HUD below)
         let (player_response, cache_spans) = {
@@ -846,56 +640,12 @@ impl App for NewPlayerApp {
             && !self.inspector_open;
         // Floating top header (toggles), visible with HUD
         if show_hud {
-            egui::Area::new("top_header".into())
-                .fixed_pos(egui::pos2(0.0, 0.0))
-                .show(&ctx, |ui| {
-                    ui.set_min_width(ctx.viewport_rect().width());
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.add_space(12.0);
-                            for (id, icon, on) in [
-                                ("nav", ICON_LAYERS, self.nav_rail_open),
-                                ("chat", ICON_MESSAGE, self.chats_open),
-                                ("insp", ICON_INFO, self.inspector_open),
-                            ] {
-                                let fill = if on { C_RAISED2 } else { C_RAISED };
-                                let stroke = if on {
-                                    egui::Stroke::new(
-                                        1.0,
-                                        egui::Color32::from_rgb(0x33, 0x33, 0x42),
-                                    )
-                                } else {
-                                    egui::Stroke::new(1.0, C_BORDER2)
-                                };
-                                let txt_col = if on { C_TEXT } else { C_DIM };
-                                let btn = ui
-                                    .scope(|ui| {
-                                        let v = &mut ui.style_mut().visuals;
-                                        v.widgets.hovered.weak_bg_fill = fill;
-                                        v.widgets.hovered.bg_stroke = stroke;
-                                        v.widgets.hovered.fg_stroke.color = txt_col;
-                                        ui.add_sized(
-                                            egui::vec2(32.0, 32.0),
-                                            egui::Button::new(
-                                                icon.rich_text().size(14.0).color(txt_col),
-                                            )
-                                            .fill(fill)
-                                            .stroke(stroke),
-                                        )
-                                    })
-                                    .inner;
-                                if btn.clicked() {
-                                    match id {
-                                        "nav" => self.nav_rail_open = !self.nav_rail_open,
-                                        "chat" => self.chats_open = !self.chats_open,
-                                        "insp" => self.inspector_open = !self.inspector_open,
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        });
-                    });
-                });
+            top_bar::show(
+                &ctx,
+                &mut self.nav_rail_open,
+                &mut self.chats_open,
+                &mut self.inspector_open,
+            );
         }
 
         if show_hud {
@@ -1352,114 +1102,62 @@ impl App for NewPlayerApp {
 
         // Floating inspector overlay
         if self.inspector_open {
-            let screen = ctx.viewport_rect();
-            let insp_resp = egui::Area::new("inspector_overlay".into())
-                .fixed_pos(egui::pos2(screen.width() - 296.0, 0.0))
-                .show(&ctx, |ui| {
-                    egui::Frame::new()
-                        .fill(C_SIDEBAR)
-                        .stroke(egui::Stroke::new(1.0, C_BORDER2))
-                        .corner_radius(0.0)
-                        .inner_margin(egui::Margin {
-                            left: 8,
-                            right: 12,
-                            top: 2,
-                            bottom: 10,
-                        })
-                        .show(ui, |ui| {
-                            ui.set_width(280.0);
-                            ui.set_min_height(ctx.viewport_rect().height() - 8.0);
-                            ui.set_max_height(ctx.viewport_rect().height() - 8.0);
-                            ui.label(
-                                egui::RichText::new("MEDIA INSPECTOR")
-                                    .monospace()
-                                    .size(11.0)
-                                    .strong()
-                                    .color(C_DIM),
-                            );
-                            // Port / proxy info
-                            if let Some(url) = self.proxy_url_mut().clone() {
-                                ui.label(
-                                    egui::RichText::new(format!("proxy: {}", url))
-                                        .monospace()
-                                        .size(11.0)
-                                        .color(C_MUTED),
-                                );
-                            }
-                            if let Ok(pos) = self.player_mut().time_pos() {
-                                ui.label(
-                                    egui::RichText::new(format!("pos: {:.1}s", pos.unwrap_or(0.0)))
-                                        .monospace()
-                                        .size(11.0)
-                                        .color(C_MUTED),
-                                );
-                            }
-                            // Video info from mpv
-                            let mpv = self.player_mut().mpv();
-                            let mut info_lines: Vec<String> = Vec::new();
-                            if let Ok(w) = mpv.get_property::<i64>("width") {
-                                if let Ok(h) = mpv.get_property::<i64>("height") {
-                                    info_lines.push(format!("resolution: {}x{}", w, h));
-                                }
-                            }
-                            if let Ok(c) = mpv.get_property::<String>("video-codec") {
-                                if !c.is_empty() {
-                                    info_lines.push(format!("video codec: {}", c));
-                                }
-                            }
-                            if let Ok(c) = mpv.get_property::<String>("audio-codec") {
-                                if !c.is_empty() {
-                                    info_lines.push(format!("audio codec: {}", c));
-                                }
-                            }
-                            if let Ok(fs) = mpv.get_property::<i64>("file-size") {
-                                if fs > 0 {
-                                    info_lines.push(format!(
-                                        "file size: {:.1} MB",
-                                        fs as f64 / 1_048_576.0
-                                    ));
-                                }
-                            }
-                            if let Ok(vb) = mpv.get_property::<f64>("video-bitrate") {
-                                if vb > 0.0 {
-                                    info_lines
-                                        .push(format!("video bitrate: {:.0} kbps", vb / 1000.0));
-                                }
-                            }
-                            if let Ok(ab) = mpv.get_property::<f64>("audio-bitrate") {
-                                if ab > 0.0 {
-                                    info_lines
-                                        .push(format!("audio bitrate: {:.0} kbps", ab / 1000.0));
-                                }
-                            }
-                            if let Ok(fps) = mpv.get_property::<f64>("container-fps") {
-                                if fps > 0.0 {
-                                    info_lines.push(format!("fps: {:.2}", fps));
-                                }
-                            }
-                            for line in info_lines {
-                                ui.label(
-                                    egui::RichText::new(line)
-                                        .monospace()
-                                        .size(11.0)
-                                        .color(C_MUTED),
-                                );
-                            }
-                        });
-                });
-            let clicked_outside = ctx.input(|i| i.pointer.any_click())
-                && ctx.input(|i| {
-                    let pos = i.pointer.hover_pos();
-                    let in_overlay = pos
-                        .map(|p| insp_resp.response.rect.contains(p))
-                        .unwrap_or(false);
-                    let in_navrail = pos.map(|p| p.x < 60.0 && p.y >= 40.0).unwrap_or(false);
-                    let in_toolbar = pos
-                        .map(|p| p.y >= video_rect.min.y && p.y < video_rect.min.y + 40.0)
-                        .unwrap_or(false);
-                    !in_overlay && !in_navrail && !in_toolbar
-                });
-            if clicked_outside {
+            let proxy_url = self.proxy_url_mut().clone();
+            let pos_line = self
+                .player_mut()
+                .time_pos()
+                .ok()
+                .flatten()
+                .map(|pos| format!("pos: {:.1}s", pos));
+            let info_lines = {
+                let mpv = self.player_mut().mpv();
+                let mut lines: Vec<String> = Vec::new();
+                if let Ok(w) = mpv.get_property::<i64>("width")
+                    && let Ok(h) = mpv.get_property::<i64>("height")
+                {
+                    lines.push(format!("resolution: {}x{}", w, h));
+                }
+                if let Ok(c) = mpv.get_property::<String>("video-codec")
+                    && !c.is_empty()
+                {
+                    lines.push(format!("video codec: {}", c));
+                }
+                if let Ok(c) = mpv.get_property::<String>("audio-codec")
+                    && !c.is_empty()
+                {
+                    lines.push(format!("audio codec: {}", c));
+                }
+                if let Ok(fs) = mpv.get_property::<i64>("file-size")
+                    && fs > 0
+                {
+                    lines.push(format!("file size: {:.1} MB", fs as f64 / 1_048_576.0));
+                }
+                if let Ok(vb) = mpv.get_property::<f64>("video-bitrate")
+                    && vb > 0.0
+                {
+                    lines.push(format!("video bitrate: {:.0} kbps", vb / 1000.0));
+                }
+                if let Ok(ab) = mpv.get_property::<f64>("audio-bitrate")
+                    && ab > 0.0
+                {
+                    lines.push(format!("audio bitrate: {:.0} kbps", ab / 1000.0));
+                }
+                if let Ok(fps) = mpv.get_property::<f64>("container-fps")
+                    && fps > 0.0
+                {
+                    lines.push(format!("fps: {:.2}", fps));
+                }
+                lines
+            };
+            let dismiss = right_sidebar::show(
+                &ctx,
+                proxy_url.as_deref(),
+                pos_line,
+                &info_lines,
+                video_rect.min.y + 40.0,
+                60.0,
+            );
+            if dismiss {
                 self.inspector_open = false;
             }
         }

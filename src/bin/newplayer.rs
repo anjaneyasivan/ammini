@@ -1197,7 +1197,7 @@ impl App for NewPlayerApp {
         if self.chats_open {
             let x = if self.nav_rail_open { 58.0 } else { 8.0 };
             let chats_resp = egui::Area::new("chats_overlay".into())
-                .fixed_pos(egui::pos2(x, 36.0))
+                .fixed_pos(egui::pos2(x, 0.0))
                 .show(&ctx, |ui| {
                     egui::Frame::new()
                         .fill(C_SIDEBAR)
@@ -1211,8 +1211,8 @@ impl App for NewPlayerApp {
                         })
                         .show(ui, |ui| {
                             ui.set_width(300.0);
-                            ui.set_min_height(ctx.viewport_rect().height() - 44.0);
-                            ui.set_max_height(ctx.viewport_rect().height() - 44.0);
+                            ui.set_min_height(ctx.viewport_rect().height() - 8.0);
+                            ui.set_max_height(ctx.viewport_rect().height() - 8.0);
                             let title = match self.active_tab {
                                 "telegram" => "TELEGRAM",
                                 "recent" => "RECENTLY PLAYED",
@@ -1346,7 +1346,7 @@ impl App for NewPlayerApp {
         if self.inspector_open {
             let screen = ctx.viewport_rect();
             let insp_resp = egui::Area::new("inspector_overlay".into())
-                .fixed_pos(egui::pos2(screen.width() - 296.0, 40.0))
+                .fixed_pos(egui::pos2(screen.width() - 296.0, 0.0))
                 .show(&ctx, |ui| {
                     egui::Frame::new()
                         .fill(C_SIDEBAR)
@@ -1360,8 +1360,8 @@ impl App for NewPlayerApp {
                         })
                         .show(ui, |ui| {
                             ui.set_width(280.0);
-                            ui.set_min_height(ctx.viewport_rect().height() - 44.0);
-                            ui.set_max_height(ctx.viewport_rect().height() - 44.0);
+                            ui.set_min_height(ctx.viewport_rect().height() - 8.0);
+                            ui.set_max_height(ctx.viewport_rect().height() - 8.0);
                             ui.label(
                                 egui::RichText::new("MEDIA INSPECTOR")
                                     .monospace()

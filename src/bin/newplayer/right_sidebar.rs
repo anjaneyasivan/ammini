@@ -12,9 +12,8 @@ pub fn show(
     header_bottom: f32,
     navrail_right: f32,
 ) -> bool {
-    let screen = ctx.viewport_rect();
     let insp_resp = egui::Area::new("inspector_overlay".into())
-        .fixed_pos(egui::pos2(screen.width() - 296.0, 0.0))
+        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 0.0))
         .show(ctx, |ui| {
             egui::Frame::new()
                 .fill(C_SIDEBAR)

@@ -496,7 +496,7 @@ impl App for NewPlayerApp {
                 ui.set_width(56.0);
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
-                    let items = [("library","material-symbols-light","movie"), ("telegram","material-symbols-light","chat"), ("audio","material-symbols-light","music-note"), ("subtitles","material-symbols-light","subtitles"), ("recent","material-symbols-light","history")];
+                    let items = [("telegram","arcticons","telegram"), ("subtitles","material-symbols-light","subtitles"), ("recent","material-symbols-light","history")];
                     for (id, pfx, name) in items {
                         let active = self.active_tab == id;
                         let fill = if active { C_RAISED2 } else { egui::Color32::TRANSPARENT };

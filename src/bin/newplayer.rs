@@ -208,8 +208,9 @@ impl App for App2 {
                                    ("insp", ICON_INFO, self.inspector_open)];
                     for (id, icon, on) in toggles {
                         let fill = if on { C_RAISED2 } else { C_RAISED };
+                        let stroke = if on { egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33,0x33,0x42)) } else { egui::Stroke::new(1.0, C_BORDER2) };
                         let txt_col = if on { C_TEXT } else { C_DIM };
-                        if ui.add(egui::Button::new(icon.rich_text().size(14.0).color(txt_col)).fill(fill).min_size(egui::vec2(24.0,24.0))).clicked() {
+                        if ui.add(egui::Button::new(icon.rich_text().size(14.0).color(txt_col)).fill(fill).stroke(stroke).min_size(egui::vec2(24.0,24.0))).clicked() {
                             match id {
                                 "nav" => self.nav_rail_open = !self.nav_rail_open,
                                 "chat" => self.chats_open = !self.chats_open,
@@ -236,8 +237,14 @@ impl App for App2 {
                     for item in NAV_TOP {
                         let active = self.active_tab == item.id;
                         let fill = if active { C_RAISED2 } else { egui::Color32::TRANSPARENT };
+                        let stroke = if active { egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33,0x33,0x42)) } else { egui::Stroke::NONE };
                         let col = if active { C_TEXT } else { C_DIM };
-                        let btn = ui.add(egui::Button::new(item.icon.rich_text().size(16.0).color(col)).fill(fill).min_size(egui::vec2(40.0,40.0)));
+                        let btn = ui.add(
+                            egui::Button::new(item.icon.rich_text().size(16.0).color(col))
+                                .fill(fill)
+                                .stroke(stroke)
+                                .min_size(egui::vec2(40.0, 40.0)),
+                        );
                         if btn.clicked() { self.active_tab = item.id; }
                         btn.on_hover_text(item.label);
                         ui.add_space(4.0);

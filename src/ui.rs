@@ -223,7 +223,7 @@ impl App for AmminiApp {
         }
         let menu_open = self.audio_menu_open || self.subs_menu_open || self.volume_popup_hovered;
         let hud_on = (!is_paused
-            && self.last_input.elapsed() < std::time::Duration::from_millis(4000))
+            && self.last_input.elapsed() < std::time::Duration::from_millis(2000))
             || is_paused
             || menu_open;
         let show_hud = hud_on && !self.chats_open && !self.inspector_open;

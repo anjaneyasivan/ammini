@@ -543,21 +543,23 @@ impl App for NewPlayerApp {
             let cache_spans = self.current_cache_spans();
             let cache_color = ammini::style::cache_bar_fill(ui.visuals().widgets.inactive.bg_fill);
             let pending = self.pending_seek.clone();
-            let r = ui.add(
-                SharkPlayer::new(self.player_mut())
-                    .show_hud(false)
-                    .seek_callback(Rc::new(move |_forward, target| {
-                        *pending.lock().unwrap() = Some(SeekTracker::new(target, _forward));
-                    }))
-                    .cache_overlay(cache_spans.clone(), cache_color),
-            );
+            let r = ui.centered_and_justified(|ui| {
+                ui.add(
+                    SharkPlayer::new(self.player_mut())
+                        .show_hud(false)
+                        .seek_callback(Rc::new(move |_forward, target| {
+                            *pending.lock().unwrap() = Some(SeekTracker::new(target, _forward));
+                        }))
+                        .cache_overlay(cache_spans.clone(), cache_color),
+                )
+            });
             self.video_focus_id = Some(SharkPlayer::player_focus_id(ui));
             (r, cache_spans)
         };
 
         // Loading overlay
         if self.telegram_load_in_progress() {
-            let video_rect = player_response.rect;
+            let video_rect = player_response.inner.rect;
             let painter = ui.painter().with_clip_rect(video_rect);
             painter.rect_filled(video_rect, 0.0, egui::Color32::from_black_alpha(70));
             let spinner_size = 40.0;
@@ -577,7 +579,7 @@ impl App for NewPlayerApp {
         }
 
         // Custom redesign HUD (auto-hide)
-        let video_rect = player_response.rect;
+        let video_rect = player_response.inner.rect;
         let hovered = ctx
             .pointer_hover_pos()
             .map(|p| video_rect.contains(p) || p.y < 40.0)
@@ -716,13 +718,42 @@ impl App for NewPlayerApp {
                             {
                                 let _ = self.player_mut().seek_relative(10.0);
                             }
-                            // volume
-                            let mut vol = self.player_mut().volume().unwrap_or(50.0) as f32;
+                            // volume: mute icon + slider that expands on hover
+                            let muted = self.player_mut().volume().unwrap_or(50.0) <= 0.0;
+                            let mute_icon: &[u8] = if muted {
+                                include_bytes!("../../../assets/icons/newplayer/volume-off.svg")
+                            } else {
+                                include_bytes!("../../../assets/icons/newplayer/volume-up.svg")
+                            };
                             if ui
-                                .add(egui::Slider::new(&mut vol, 0.0..=100.0).show_value(false))
-                                .changed()
+                                .add(
+                                    egui::Button::image(
+                                        egui::Image::from_bytes("volume.svg", mute_icon)
+                                            .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                                    )
+                                    .fill(C_RAISED)
+                                    .min_size(egui::vec2(36.0, 36.0)),
+                                )
+                                .clicked()
                             {
-                                let _ = self.player_mut().set_volume(vol as f64);
+                                let _ = self.player_mut().toggle_mute();
+                            }
+                            let (slider_rect, _) =
+                                ui.allocate_exact_size(egui::vec2(110.0, 24.0), egui::Sense::hover());
+                            let slider_hovered = slider_rect
+                                .contains(ctx.pointer_hover_pos().unwrap_or(egui::Pos2::ZERO))
+                                || ui.rect_contains_pointer(slider_rect);
+                            if slider_hovered {
+                                let mut vol = self.player_mut().volume().unwrap_or(50.0) as f32;
+                                if ui
+                                    .put(
+                                        slider_rect,
+                                        egui::Slider::new(&mut vol, 0.0..=100.0).show_value(false),
+                                    )
+                                    .changed()
+                                {
+                                    let _ = self.player_mut().set_volume(vol as f64);
+                                }
                             }
                             let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
                             let dur = self.player_mut().duration().ok().flatten().unwrap_or(0.0);

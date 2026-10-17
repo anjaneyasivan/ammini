@@ -550,14 +550,15 @@ impl App for NewPlayerApp {
 
         // Custom redesign HUD (auto-hide)
         let video_rect = player_response.rect;
-        let pointer = ctx.pointer_hover_pos();
-        let hovered = pointer.map(|p| video_rect.contains(p)).unwrap_or(false);
+        let hovered = ui.rect_contains_pointer(video_rect);
         let is_paused = self.player_mut().paused().unwrap_or(true);
         if hovered {
-            if self.hud_hover.is_none_or(|(_, prev)| pointer.map(|p| p != prev).unwrap_or(true)) {
-                self.hud_hover = pointer.map(|p| (std::time::Instant::now(), p));
+            if let Some(pos) = ctx.pointer_hover_pos() {
+                if self.hud_hover.map(|(_, prev)| prev != pos).unwrap_or(true) {
+                    self.hud_hover = Some((std::time::Instant::now(), pos));
+                }
             }
-        } else {
+        } else if !ui.rect_contains_pointer(egui::Rect::from_min_size(video_rect.min + egui::vec2(0.0, video_rect.height() - 70.0), egui::vec2(video_rect.width(), 70.0))) {
             self.hud_hover = None;
         }
         let show_hud = (is_paused || self.hud_hover.as_ref().map(|(t, _)| t.elapsed().as_secs_f32() < 3.0).unwrap_or(false) || self.audio_menu_open || self.subs_menu_open) && !self.chats_open && !self.inspector_open;
@@ -580,9 +581,9 @@ impl App for NewPlayerApp {
                         if ui.add(egui::Button::new("⏮").fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() { let _ = self.player_mut().seek_relative(-10.0); }
                         if ui.add(egui::Button::new("⏭").fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() { let _ = self.player_mut().seek_relative(10.0); }
                         // volume
-                        let vol = self.player_mut().volume().unwrap_or(50.0);
-                        if ui.add(egui::Slider::new(&mut (vol as f32), 0.0..=100.0).show_value(false)).changed() {
-                            let _ = self.player_mut().set_volume(vol);
+                        let mut vol = self.player_mut().volume().unwrap_or(50.0) as f32;
+                        if ui.add(egui::Slider::new(&mut vol, 0.0..=100.0).show_value(false)).changed() {
+                            let _ = self.player_mut().set_volume(vol as f64);
                         }
                         let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
                         let dur = self.player_mut().duration().ok().flatten().unwrap_or(0.0);

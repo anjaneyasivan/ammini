@@ -225,6 +225,7 @@ impl NewPlayerApp {
         let (bg_tx, ui_rx) = match TelegramConfig::from_env() {
             Ok(cfg) => {
                 let (tx, rx) = start(cfg);
+                eprintln!("[dbg] telegram started, bg_tx=Some");
                 (Some(tx), rx)
             }
             Err(e) => {
@@ -414,6 +415,7 @@ impl App for NewPlayerApp {
         let mut events = Vec::new();
 
         while let Ok(msg) = self.ui_rx.try_recv() {
+            eprintln!("[dbg] ui_msg: {msg:?}");
             match msg {
                 UiMessage::ProxyReady { port } => { *self.proxy_url_mut() = Some(format!("http://127.0.0.1:{port}")); }
                 UiMessage::VideoReady { msg_id, url, name } => {
@@ -449,8 +451,6 @@ impl App for NewPlayerApp {
         self.handle_url_dialog(ui, &mut events);
         self.refresh_tracks();
 
-        // collect player events separately
-        let mut events = Vec::new();
         events.push(PlayerEvent::Poll);
 
         ctx.set_visuals(egui::Visuals::dark());
@@ -503,31 +503,89 @@ impl App for NewPlayerApp {
             });
         }
 
-        // Central viewport with SharkPlayer
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(C_VIEWPORT)).show(ui, |ui| {
+        // Central viewport with SharkPlayer (HUD disabled; custom HUD below)
+        let (player_response, cache_spans) = {
             let cache_spans = self.current_cache_spans();
             let cache_color = ammini::style::cache_bar_fill(ui.visuals().widgets.inactive.bg_fill);
             let pending = self.pending_seek.clone();
-            let player_response = ui.add(
+            let r = ui.add(
                 SharkPlayer::new_with_icons(self.player_mut(), PlayerControlIcons)
+                    .show_hud(false)
                     .seek_callback(Rc::new(move |_forward, target| {
                         *pending.lock().unwrap() = Some(SeekTracker::new(target, _forward));
                     }))
-                    .cache_overlay(cache_spans, cache_color),
+                    .cache_overlay(cache_spans.clone(), cache_color),
             );
             self.video_focus_id = Some(SharkPlayer::player_focus_id(ui));
+            (r, cache_spans)
+        };
 
-            if self.telegram_load_in_progress() {
-                let video_rect = player_response.rect;
-                let painter = ui.painter().with_clip_rect(video_rect);
-                painter.rect_filled(video_rect, 0.0, egui::Color32::from_black_alpha(70));
-                let spinner_size = 40.0;
-                let spinner_rect = egui::Rect::from_center_size(video_rect.center(), egui::Vec2::splat(spinner_size));
-                egui::Spinner::new().size(spinner_size).paint_at(ui, spinner_rect);
-                let font_id = egui::TextStyle::Body.resolve(ui.style());
-                painter.text(egui::pos2(video_rect.center().x, spinner_rect.max.y + 12.0), egui::Align2::CENTER_TOP, "Loading…", font_id, ui.visuals().weak_text_color());
-            }
-        });
+        // Loading overlay
+        if self.telegram_load_in_progress() {
+            let video_rect = player_response.rect;
+            let painter = ui.painter().with_clip_rect(video_rect);
+            painter.rect_filled(video_rect, 0.0, egui::Color32::from_black_alpha(70));
+            let spinner_size = 40.0;
+            let spinner_rect = egui::Rect::from_center_size(video_rect.center(), egui::Vec2::splat(spinner_size));
+            egui::Spinner::new().size(spinner_size).paint_at(ui, spinner_rect);
+            let font_id = egui::TextStyle::Body.resolve(ui.style());
+            painter.text(egui::pos2(video_rect.center().x, spinner_rect.max.y + 12.0), egui::Align2::CENTER_TOP, "Loading…", font_id, ui.visuals().weak_text_color());
+        }
+
+        // Custom redesign HUD (auto-hide)
+        let video_rect = player_response.rect;
+        let hovered = ui.rect_contains_pointer(video_rect);
+        let is_paused = self.player_mut().paused().unwrap_or(true);
+        let show_hud = hovered || is_paused;
+        if show_hud {
+            egui::Area::new("hud".into()).fixed_pos(video_rect.min).show(&ctx, |ui| {
+                ui.set_min_size(video_rect.size());
+                ui.set_max_size(video_rect.size());
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    // controls row
+                    ui.horizontal(|ui| {
+                        ui.add_space(8.0);
+                        let playing = !is_paused;
+                        if ui.add(egui::Button::new(if playing { "⏸" } else { "▶" }).fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() {
+                            let _ = self.player_mut().toggle_pause();
+                        }
+                        if ui.add(egui::Button::new("⏮").fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() { let _ = self.player_mut().seek_relative(-10.0); }
+                        if ui.add(egui::Button::new("⏭").fill(C_RAISED).min_size(egui::vec2(28.0,28.0))).clicked() { let _ = self.player_mut().seek_relative(10.0); }
+                        // volume
+                        let vol = self.player_mut().volume().unwrap_or(50.0);
+                        if ui.add(egui::Slider::new(&mut (vol as f32), 0.0..=100.0).show_value(false)).changed() {
+                            let _ = self.player_mut().set_volume(vol);
+                        }
+                        let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
+                        let dur = self.player_mut().duration().ok().flatten().unwrap_or(0.0);
+                        ui.label(egui::RichText::new(format!("{:.0}:{:02} / {:.0}:{:02}", pos/60.0, pos%60.0, dur/60.0, dur%60.0)).monospace().size(11.0).color(C_MUTED));
+                        ui.add_space(8.0);
+                    });
+                    // timeline
+                    let (tl_rect, tl_resp) = ui.allocate_exact_size(egui::vec2(video_rect.width() - 24.0, 6.0), egui::Sense::click_and_drag());
+                    let painter = ui.painter();
+                    painter.rect_filled(tl_rect, 3.0, C_RAISED);
+                    // buffered
+                    let dur = self.player_mut().duration().ok().flatten().unwrap_or(1.0).max(1.0);
+                    for (s, e) in &cache_spans {
+                        let x0 = tl_rect.min.x + (s / dur) as f32 * tl_rect.width();
+                        let x1 = tl_rect.min.x + (e / dur) as f32 * tl_rect.width();
+                        painter.rect_filled(egui::Rect::from_min_max(egui::pos2(x0, tl_rect.min.y), egui::pos2(x1, tl_rect.max.y)), 3.0, egui::Color32::from_rgb(0x36,0x36,0x44));
+                    }
+                    // played
+                    let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
+                    let played_w = (pos / dur) as f32 * tl_rect.width();
+                    painter.rect_filled(egui::Rect::from_min_size(tl_rect.min, egui::vec2(played_w, tl_rect.height())), 3.0, C_TEXT);
+                    if tl_resp.clicked() || tl_resp.dragged() {
+                        if let Some(p) = tl_resp.interact_pointer_pos() {
+                            let frac = ((p.x - tl_rect.min.x) / tl_rect.width()).clamp(0.0, 1.0);
+                            let _ = self.player_mut().seek_to(frac as f64 * dur);
+                        }
+                    }
+                    ui.add_space(8.0);
+                });
+            });
+        }
 
         // Floating chats overlay (Telegram)
         if self.chats_open {
@@ -573,7 +631,8 @@ impl App for NewPlayerApp {
             if close { self.show_url_dialog = false; self.url_input.clear(); }
         }
 
-        // dispatch events
+        eprintln!("[dbg] dispatching {} events", events.len());
+        for event in &events { eprintln!("[dbg]   event: {event:?}"); }
         for event in events {
             match event { PlayerEvent::Poll => trace!("poll"), _ => debug!("{event:?}") }
             self.fsm.handle(&event);

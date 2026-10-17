@@ -197,7 +197,7 @@ impl App for AmminiApp {
         if moved {
             self.last_input = std::time::Instant::now();
         }
-        let menu_open = self.audio_menu_open || self.subs_menu_open;
+        let menu_open = self.audio_menu_open || self.subs_menu_open || self.volume_popup_hovered;
         let hud_on = (!is_paused
             && self.last_input.elapsed() < std::time::Duration::from_millis(4000))
             || is_paused

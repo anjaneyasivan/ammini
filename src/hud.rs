@@ -133,49 +133,75 @@ impl AmminiApp {
                             {
                                 let _ = self.player_mut().seek_relative(10.0);
                             }
-                            // volume: mute icon + slider that expands on hover
+                            // volume: mute icon + vertical slider popup on hover
                             let muted = self.player_mut().volume().unwrap_or(50.0) <= 0.0;
                             let mute_icon: &[u8] = if muted {
                                 ammini::icons::ICON_KL_VOLUME_OFF_FILL.1
                             } else {
                                 ammini::icons::ICON_KL_VOLUME_FILL.1
                             };
-                            if ui
-                                .add(
-                                    egui::Button::image(
-                                        egui::Image::from_bytes(
-                                            if muted {
-                                                "volume-off.svg"
-                                            } else {
-                                                "volume-up.svg"
-                                            },
-                                            mute_icon,
-                                        )
-                                        .fit_to_exact_size(egui::vec2(18.0, 18.0)),
+                            let mute_resp = ui.add(
+                                egui::Button::image(
+                                    egui::Image::from_bytes(
+                                        if muted {
+                                            "volume-off.svg"
+                                        } else {
+                                            "volume-up.svg"
+                                        },
+                                        mute_icon,
                                     )
-                                    .fill(C_RAISED)
-                                    .min_size(egui::vec2(36.0, 36.0)),
+                                    .fit_to_exact_size(egui::vec2(18.0, 18.0)),
                                 )
-                                .clicked()
-                            {
+                                .fill(C_RAISED)
+                                .min_size(egui::vec2(36.0, 36.0)),
+                            );
+                            if mute_resp.clicked() {
                                 let _ = self.player_mut().toggle_mute();
                             }
-                            let (slider_rect, _) = ui
-                                .allocate_exact_size(egui::vec2(110.0, 24.0), egui::Sense::hover());
-                            let slider_hovered = slider_rect
-                                .contains(ctx.pointer_hover_pos().unwrap_or(egui::Pos2::ZERO))
-                                || ui.rect_contains_pointer(slider_rect);
-                            if slider_hovered {
-                                let mut vol = self.player_mut().volume().unwrap_or(50.0) as f32;
-                                if ui
-                                    .put(
-                                        slider_rect,
-                                        egui::Slider::new(&mut vol, 0.0..=100.0).show_value(false),
-                                    )
-                                    .changed()
-                                {
-                                    let _ = self.player_mut().set_volume(vol as f64);
-                                }
+                            let icon_rect = mute_resp.rect;
+                            let ptr = ctx.pointer_hover_pos().unwrap_or(egui::Pos2::ZERO);
+                            let icon_hovered = icon_rect.contains(ptr) || mute_resp.hovered();
+                            let popup_w = 36.0_f32;
+                            let popup_h = 110.0_f32;
+                            let popup_rect = egui::Rect::from_min_size(
+                                egui::pos2(
+                                    icon_rect.center().x - popup_w * 0.5,
+                                    icon_rect.top() - popup_h - 6.0,
+                                ),
+                                egui::vec2(popup_w, popup_h),
+                            );
+                            let popup_hovered = popup_rect.contains(ptr);
+                            let show_popup = icon_hovered || popup_hovered;
+                            self.volume_popup_hovered = show_popup;
+                            if show_popup {
+                                self.last_input = std::time::Instant::now();
+                                let popup_rect = popup_rect;
+                                egui::Area::new("volume_popup".into())
+                                    .order(egui::Order::Tooltip)
+                                    .fixed_pos(popup_rect.min)
+                                    .show(ctx, |ui| {
+                                        egui::Frame {
+                                            fill: C_RAISED,
+                                            corner_radius: egui::CornerRadius::same(8),
+                                            inner_margin: egui::Margin::same(4),
+                                            ..Default::default()
+                                        }
+                                        .show(ui, |ui| {
+                                            ui.set_min_size(egui::vec2(popup_w, popup_h));
+                                            let mut vol =
+                                                self.player_mut().volume().unwrap_or(50.0) as f32;
+                                            if ui
+                                                .add(
+                                                    egui::Slider::new(&mut vol, 0.0..=100.0)
+                                                        .vertical()
+                                                        .show_value(false),
+                                                )
+                                                .changed()
+                                            {
+                                                let _ = self.player_mut().set_volume(vol as f64);
+                                            }
+                                        });
+                                    });
                             }
                             let pos = self.player_mut().time_pos().ok().flatten().unwrap_or(0.0);
                             let dur = self.player_mut().duration().ok().flatten().unwrap_or(0.0);

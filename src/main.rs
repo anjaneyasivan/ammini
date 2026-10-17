@@ -4,6 +4,7 @@ mod iconify;
 mod left_sidebar;
 mod overlays;
 mod right_sidebar;
+mod settings_menu;
 mod theme;
 mod top_bar;
 mod types;

@@ -189,6 +189,8 @@ struct NewPlayerApp {
     inspector_open: bool,
     icon_cache: Arc<Mutex<IconCache>>,
     hud_hover: Option<(std::time::Instant, egui::Pos2)>,
+    audio_menu_open: bool,
+    subs_menu_open: bool,
 }
 
 impl NewPlayerApp {
@@ -264,6 +266,8 @@ impl NewPlayerApp {
             inspector_open: true,
             icon_cache: IconCache::new_shared(),
             hud_hover: None,
+            audio_menu_open: false,
+            subs_menu_open: false,
         };
         app.fsm.init();
         Ok(app)
@@ -546,7 +550,7 @@ impl App for NewPlayerApp {
         } else {
             self.hud_hover = None;
         }
-        let show_hud = (is_paused || self.hud_hover.as_ref().map(|(t, _)| t.elapsed().as_secs_f32() < 3.0).unwrap_or(false)) && !self.chats_open && !self.inspector_open;
+        let show_hud = (is_paused || self.hud_hover.as_ref().map(|(t, _)| t.elapsed().as_secs_f32() < 3.0).unwrap_or(false) || self.audio_menu_open || self.subs_menu_open) && !self.chats_open && !self.inspector_open;
         if show_hud {
             let hud_h = 70.0;
             egui::Area::new("hud".into()).fixed_pos(video_rect.min + egui::vec2(0.0, video_rect.height() - hud_h)).show(&ctx, |ui| {
@@ -576,28 +580,46 @@ impl App for NewPlayerApp {
                         let dur_s = dur.floor() as i64;
                         // Audio track selector
                         let audio_label = self.audio_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Audio".to_string());
-                        ui.menu_button(audio_label, |ui| {
-                            for t in self.audio_tracks.clone() {
-                                if ui.selectable_label(t.selected, &t.label).clicked() {
-                                    if let Ok(()) = self.player_mut().mpv().set_property("aid", t.id) {
-                                        for tr in &mut self.audio_tracks { tr.selected = tr.id == t.id; }
+                        if ui.add(egui::Button::new(audio_label).fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() {
+                            self.audio_menu_open = !self.audio_menu_open;
+                            self.subs_menu_open = false;
+                        }
+                        if self.audio_menu_open {
+                            egui::Area::new("audio_menu".into()).fixed_pos(egui::pos2(120.0, 100.0)).show(&ctx, |ui| {
+                                egui::Frame::new().fill(C_RAISED).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(6.0).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+                                    ui.set_min_width(180.0);
+                                    for t in self.audio_tracks.clone() {
+                                        if ui.selectable_label(t.selected, &t.label).clicked() {
+                                            if let Ok(()) = self.player_mut().mpv().set_property("aid", t.id) {
+                                                for tr in &mut self.audio_tracks { tr.selected = tr.id == t.id; }
+                                            }
+                                            self.audio_menu_open = false;
+                                        }
                                     }
-                                    ui.close();
-                                }
-                            }
-                        });
+                                });
+                            });
+                        }
                         // Subtitle track selector
                         let sub_label = self.subtitle_tracks.iter().find(|t| t.selected).map(|t| t.label.clone()).unwrap_or_else(|| "Subs".to_string());
-                        ui.menu_button(sub_label, |ui| {
-                            for t in self.subtitle_tracks.clone() {
-                                if ui.selectable_label(t.selected, &t.label).clicked() {
-                                    if let Ok(()) = self.player_mut().mpv().set_property("sid", t.id) {
-                                        for tr in &mut self.subtitle_tracks { tr.selected = tr.id == t.id; }
+                        if ui.add(egui::Button::new(sub_label).fill(C_RAISED).min_size(egui::vec2(0.0,24.0))).clicked() {
+                            self.subs_menu_open = !self.subs_menu_open;
+                            self.audio_menu_open = false;
+                        }
+                        if self.subs_menu_open {
+                            egui::Area::new("subs_menu".into()).fixed_pos(egui::pos2(120.0, 100.0)).show(&ctx, |ui| {
+                                egui::Frame::new().fill(C_RAISED).stroke(egui::Stroke::new(1.0, C_BORDER2)).corner_radius(6.0).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+                                    ui.set_min_width(180.0);
+                                    for t in self.subtitle_tracks.clone() {
+                                        if ui.selectable_label(t.selected, &t.label).clicked() {
+                                            if let Ok(()) = self.player_mut().mpv().set_property("sid", t.id) {
+                                                for tr in &mut self.subtitle_tracks { tr.selected = tr.id == t.id; }
+                                            }
+                                            self.subs_menu_open = false;
+                                        }
                                     }
-                                    ui.close();
-                                }
-                            }
-                        });
+                                });
+                            });
+                        }
                         ui.label(egui::RichText::new(format!("{:02}:{:02} / {:02}:{:02}", pos_s / 60, pos_s % 60, dur_s / 60, dur_s % 60)).monospace().size(11.0).color(C_MUTED));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let is_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
@@ -709,6 +731,12 @@ impl App for NewPlayerApp {
         // VideoReady handling from drained messages needs OpenTelegramUrl event; handle via telegram fsm data?
         // We'll handle OpenTelegramUrl by checking if a video was just readied — skip for now; telegram panel handles play.
 
+        if self.audio_menu_open || self.subs_menu_open {
+            if ctx.input(|i| i.pointer.any_click()) {
+                self.audio_menu_open = false;
+                self.subs_menu_open = false;
+            }
+        }
         self.poll_seek();
         self.update_display_sleep();
     }

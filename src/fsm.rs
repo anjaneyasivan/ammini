@@ -50,6 +50,13 @@ pub struct PersistentState {
     /// message via its chat + message ids.
     #[serde(default)]
     pub recent_telegram: Vec<RecentTelegram>,
+    /// Playback speed (mpv units), applied at startup and on media load.
+    #[serde(default = "default_playback_speed")]
+    pub playback_speed: f64,
+}
+
+fn default_playback_speed() -> f64 {
+    1.0
 }
 
 pub struct PlayerFsm {

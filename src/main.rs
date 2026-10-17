@@ -89,6 +89,7 @@ struct NewPlayerApp {
     last_input: std::time::Instant,
     audio_menu_open: bool,
     subs_menu_open: bool,
+    playback_speed: f64,
     frame_count: u64,
     menu_opened_frame: u64,
     pending_open_file: Option<String>,
@@ -144,6 +145,7 @@ impl NewPlayerApp {
         {
             tracing::warn!("failed to restore volume {volume}: {e}");
         }
+        let playback_speed = player_fsm.persistent.playback_speed;
         let fsm = player_fsm.state_machine();
 
         let mut telegram_fsm = TelegramFsm::new().state_machine();
@@ -194,11 +196,13 @@ impl NewPlayerApp {
             last_input: std::time::Instant::now(),
             audio_menu_open: false,
             subs_menu_open: false,
+            playback_speed,
             frame_count: 0,
             menu_opened_frame: 0,
             pending_open_file: None,
         };
         app.fsm.init();
+        let _ = app.player_mut().mpv().set_property("speed", playback_speed);
         Ok(app)
     }
 
@@ -859,16 +863,22 @@ impl App for NewPlayerApp {
                                         ));
                                     }
                                     // Speed menu
-                                    ui.menu_button("1.0x", |ui| {
+                                    let speed_label = format!("{:.2}x", self.playback_speed)
+                                        .trim_end_matches('0')
+                                        .trim_end_matches('.')
+                                        .to_string()
+                                        + "x";
+                                    ui.menu_button(speed_label, |ui| {
                                         for speed in [0.5f64, 0.75, 1.0, 1.25, 1.5, 2.0] {
-                                            if ui
-                                                .selectable_label(false, format!("{speed}x"))
-                                                .clicked()
-                                            {
-                                                let _ = self
-                                                    .player_mut()
-                                                    .mpv()
-                                                    .set_property("speed", speed);
+                                            let selected = (speed - self.playback_speed).abs() < f64::EPSILON;
+                                            let label = if selected {
+                                                format!("✓ {speed}x")
+                                            } else {
+                                                format!("{speed}x")
+                                            };
+                                            if ui.selectable_label(selected, &label).clicked() {
+                                                self.playback_speed = speed;
+                                                let _ = self.player_mut().mpv().set_property("speed", speed);
                                                 ui.close();
                                             }
                                         }
@@ -1462,6 +1472,8 @@ impl App for NewPlayerApp {
             ) {
                 self.byte_time_map = ammini::telegram::cache::ByteTimeMap::default();
                 self.byte_time_record_last = None;
+                let speed = self.playback_speed;
+                let _ = self.player_mut().mpv().set_property("speed", speed);
             }
             match event {
                 PlayerEvent::Poll => trace!("poll"),
@@ -1492,6 +1504,7 @@ impl App for NewPlayerApp {
         if let Ok(volume) = self.player_mut().volume() {
             let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
             persistent.volume = Some(volume);
+            persistent.playback_speed = self.playback_speed;
         }
         unsafe { self.fsm.inner_mut().finalize_session() };
         if let Ok(s) = serde_json::to_string(&self.fsm.persistent) {

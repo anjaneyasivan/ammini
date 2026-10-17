@@ -12,9 +12,6 @@ mod ui;
 use crate::theme::*;
 use app::NewPlayerApp;
 
-const APP_KEY: &str = "min_mpv_state";
-const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
-
 // Re-exported for convenience.
 pub use types::*;
 

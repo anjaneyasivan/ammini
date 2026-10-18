@@ -403,6 +403,13 @@ impl AmminiApp {
                 } else {
                     base_label
                 };
+                let label = if kind == "sub" && label.chars().count() > 80 {
+                    let mut s: String = label.chars().take(79).collect();
+                    s.push('…');
+                    s
+                } else {
+                    label
+                };
                 let track = MediaTrack {
                     id: mpv
                         .get_property::<i64>(&format!("track-list/{i}/id"))

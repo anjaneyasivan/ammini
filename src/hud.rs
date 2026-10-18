@@ -267,7 +267,16 @@ impl AmminiApp {
                                         .subtitle_tracks
                                         .iter()
                                         .find(|t| t.selected)
-                                        .map(|t| t.label.clone())
+                                        .map(|t| {
+                                            if t.label.chars().count() > 18 {
+                                                let mut s: String =
+                                                    t.label.chars().take(17).collect();
+                                                s.push('…');
+                                                s
+                                            } else {
+                                                t.label.clone()
+                                            }
+                                        })
                                         .unwrap_or_else(|| "Subs".to_string());
                                     let subs_resp = ui.add(
                                         egui::Button::image_and_text(

@@ -158,10 +158,17 @@ impl AmminiApp {
                                         ui.add_space(4.0);
                                     }
                                     for t in self.subtitle_tracks.clone() {
-                                        let label = if t.selected {
-                                            format!("✓ {}", t.label)
+                                        let short = if t.label.chars().count() > 22 {
+                                            let mut s: String = t.label.chars().take(21).collect();
+                                            s.push('…');
+                                            s
                                         } else {
                                             t.label.clone()
+                                        };
+                                        let label = if t.selected {
+                                            format!("✓ {}", short)
+                                        } else {
+                                            short
                                         };
                                         let (rect, resp) = ui.allocate_exact_size(
                                             egui::vec2(ui.available_width(), 32.0),
@@ -455,10 +462,17 @@ impl AmminiApp {
                                         ui.add_space(2.0);
                                     }
                                     for t in self.subtitle_tracks.clone() {
-                                        let label = if t.selected {
-                                            format!("✓ {}", t.label)
+                                        let short = if t.label.chars().count() > 22 {
+                                            let mut s: String = t.label.chars().take(21).collect();
+                                            s.push('…');
+                                            s
                                         } else {
                                             t.label.clone()
+                                        };
+                                        let label = if t.selected {
+                                            format!("✓ {}", short)
+                                        } else {
+                                            short
                                         };
                                         let (rect, resp) = ui.allocate_exact_size(
                                             egui::vec2(ui.available_width(), 28.0),

@@ -21,7 +21,7 @@ use crate::theme::*;
 use crate::types::{CacheCoverage, MediaTrack};
 
 pub const APP_KEY: &str = "min_mpv_state";
-const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "avi", "mov", "webm", "ogv", "flv"];
+const VIDEO_EXTS: &[&str] = ammini::subtitles::VIDEO_EXTS;
 
 pub struct AmminiApp {
     // player
@@ -61,6 +61,9 @@ pub struct AmminiApp {
     pub speed_menu_open: bool,
     pub settings_menu_open: bool,
     pub volume_popup_hovered: bool,
+    pub track_refresh_pending: bool,
+    pub pending_subtitle_paths: Vec<std::path::PathBuf>,
+    pub subtitle_error: Option<String>,
     pub playback_speed: f64,
     pub frame_count: u64,
     pub menu_opened_frame: u64,
@@ -171,6 +174,9 @@ impl AmminiApp {
             speed_menu_open: false,
             settings_menu_open: false,
             volume_popup_hovered: false,
+            track_refresh_pending: false,
+            pending_subtitle_paths: Vec::new(),
+            subtitle_error: None,
             playback_speed,
             frame_count: 0,
             menu_opened_frame: 0,
@@ -178,6 +184,8 @@ impl AmminiApp {
         };
         app.fsm.init();
         let _ = app.player_mut().mpv().set_property("speed", playback_speed);
+        let _ = app.player_mut().mpv().set_property("sub-auto", "fuzzy");
+        let _ = app.player_mut().mpv().set_property("sub-codepage", "auto");
         Ok(app)
     }
 
@@ -197,8 +205,39 @@ impl AmminiApp {
                 .filter_map(|f| f.path.clone())
                 .collect()
         });
-        if let Some(first) = dropped.into_iter().next() {
-            events.push(PlayerEvent::OpenFile(first.to_string_lossy().to_string()));
+        if dropped.is_empty() {
+            return;
+        }
+        let mut video: Option<std::path::PathBuf> = None;
+        let mut subs: Vec<std::path::PathBuf> = Vec::new();
+        for p in dropped {
+            if ammini::subtitles::is_subtitle_path(&p) {
+                subs.push(p);
+            } else if video.is_none() {
+                video = Some(p);
+            }
+        }
+        if let Some(v) = video {
+            events.push(PlayerEvent::OpenFile(v.to_string_lossy().to_string()));
+            self.pending_subtitle_paths = subs;
+        } else if !subs.is_empty() {
+            // No video in the drop: apply now if something is playing, else queue.
+            if matches!(self.fsm.state(), ammini::fsm::FsmState::Playing { .. }) {
+                let mpv = self.player_mut().mpv();
+                let _ = ammini::subtitles::add_subtitle_files(mpv, &subs);
+                self.track_refresh_pending = true;
+                if let Some(path) = self.fsm.current_media.clone() {
+                    let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
+                    persistent.subtitle_paths.insert(
+                        path,
+                        subs.iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect(),
+                    );
+                }
+            } else {
+                self.pending_subtitle_paths.extend(subs);
+            }
         }
     }
 
@@ -316,6 +355,11 @@ impl AmminiApp {
     }
 
     pub fn refresh_tracks(&mut self) {
+        if self.track_refresh_pending {
+            self.audio_track_count = -1;
+            self.subtitle_track_count = -1;
+            self.track_refresh_pending = false;
+        }
         let loaded = matches!(self.player_mut().duration(), Ok(Some(_)));
         if !loaded {
             if !self.audio_tracks.is_empty() {
@@ -342,19 +386,28 @@ impl AmminiApp {
                     "sub" => subtitle_tracks.len(),
                     _ => continue,
                 };
+                let base_label = track_label(
+                    mpv.get_property::<String>(&format!("track-list/{i}/title"))
+                        .ok()
+                        .filter(|s| !s.is_empty()),
+                    mpv.get_property::<String>(&format!("track-list/{i}/lang"))
+                        .ok()
+                        .filter(|s| !s.is_empty()),
+                    index,
+                );
+                let external: bool = mpv
+                    .get_property::<bool>(&format!("track-list/{i}/external"))
+                    .unwrap_or(false);
+                let label = if external {
+                    format!("{base_label} (external)")
+                } else {
+                    base_label
+                };
                 let track = MediaTrack {
                     id: mpv
                         .get_property::<i64>(&format!("track-list/{i}/id"))
                         .unwrap_or(i),
-                    label: track_label(
-                        mpv.get_property::<String>(&format!("track-list/{i}/title"))
-                            .ok()
-                            .filter(|s| !s.is_empty()),
-                        mpv.get_property::<String>(&format!("track-list/{i}/lang"))
-                            .ok()
-                            .filter(|s| !s.is_empty()),
-                        index,
-                    ),
+                    label,
                     selected: mpv
                         .get_property::<bool>(&format!("track-list/{i}/selected"))
                         .unwrap_or(false),

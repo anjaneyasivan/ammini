@@ -9,6 +9,7 @@ use std::rc::Rc;
 use tracing::{debug, info, trace};
 
 use crate::app::AmminiApp;
+use crate::theme::*;
 use crate::types::*;
 
 impl App for AmminiApp {
@@ -203,6 +204,35 @@ impl App for AmminiApp {
                 }
             }
         }
+        // Drop hint while files are being dragged over the window.
+        let hovered_files: Vec<_> = ctx.input(|i| i.raw.hovered_files.clone());
+        if !hovered_files.is_empty() {
+            let has_sub = hovered_files.iter().any(|f| {
+                f.path
+                    .as_ref()
+                    .map(|p| ammini::subtitles::is_subtitle_path(p))
+                    .unwrap_or(false)
+            });
+            let has_vid = hovered_files.iter().any(|f| {
+                f.path
+                    .as_ref()
+                    .map(|p| ammini::subtitles::is_video_path(p))
+                    .unwrap_or(false)
+            });
+            let hint = match (has_vid, has_sub) {
+                (true, true) => "Drop to open video / add subtitle",
+                (true, false) => "Drop to open video",
+                (false, true) => "Drop to add subtitle",
+                _ => "Drop files",
+            };
+            egui::Area::new("drop_hint".into())
+                .order(egui::Order::Tooltip)
+                .fixed_pos(video_rect.center() - egui::vec2(60.0, 10.0))
+                .show(&ctx, |ui| {
+                    ui.label(egui::RichText::new(hint).color(C_TEXT).size(14.0));
+                });
+        }
+
         let hovered = ctx
             .pointer_hover_pos()
             .map(|p| video_rect.contains(p) || p.y < 40.0)
@@ -286,6 +316,34 @@ impl App for AmminiApp {
                 _ => debug!("{event:?}"),
             }
             self.fsm.handle(&event);
+        }
+        // Apply queued subtitles once a video is playing.
+        if self.pending_subtitle_paths.is_empty()
+            && let Some(path) = self.fsm.current_media.clone()
+        {
+            let persistent = unsafe { &self.fsm.inner_mut().persistent };
+            if let Some(paths) = persistent.subtitle_paths.get(&path).cloned() {
+                self.pending_subtitle_paths =
+                    paths.into_iter().map(std::path::PathBuf::from).collect();
+            }
+        }
+        if !self.pending_subtitle_paths.is_empty()
+            && matches!(self.fsm.state(), ammini::fsm::FsmState::Playing { .. })
+        {
+            let paths = std::mem::take(&mut self.pending_subtitle_paths);
+            let mpv = self.player_mut().mpv();
+            let _ = ammini::subtitles::add_subtitle_files(mpv, &paths);
+            self.track_refresh_pending = true;
+            if let Some(path) = self.fsm.current_media.clone() {
+                let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
+                persistent.subtitle_paths.insert(
+                    path,
+                    paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect(),
+                );
+            }
         }
         // VideoReady handling from drained messages needs OpenTelegramUrl event; handle via telegram fsm data?
         // We'll handle OpenTelegramUrl by checking if a video was just readied — skip for now; telegram panel handles play.

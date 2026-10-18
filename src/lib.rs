@@ -4,6 +4,7 @@ pub mod fsm;
 pub mod icons;
 pub mod proxy;
 pub mod style;
+pub mod subtitles;
 pub mod telegram;
 pub mod telemetry;
 pub mod update;

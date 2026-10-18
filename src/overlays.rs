@@ -1,8 +1,10 @@
 use crate::app::AmminiApp;
 use crate::right_sidebar;
 use crate::theme::*;
+use ammini::subtitles;
 use ammini::telegram::BgCommand;
 use eframe::egui;
+use rfd::FileDialog;
 
 impl AmminiApp {
     pub fn render_chats_overlay(
@@ -19,7 +21,7 @@ impl AmminiApp {
             let x = if self.nav_rail_open { 58.0 } else { 8.0 };
             let chats_resp = egui::Area::new("chats_overlay".into())
                 .fixed_pos(egui::pos2(x, 0.0))
-                .show(&ctx, |ui| {
+                .show(ctx, |ui| {
                     egui::Frame::new()
                         .fill(C_SIDEBAR)
                         .stroke(egui::Stroke::new(1.0, C_BORDER2))
@@ -122,6 +124,39 @@ impl AmminiApp {
                                 "subtitles" => {
                                     ui.label(egui::RichText::new("Subtitle tracks").color(C_MUTED));
                                     ui.add_space(6.0);
+                                    {
+                                        let selected =
+                                            !self.subtitle_tracks.iter().any(|t| t.selected);
+                                        let (rect, resp) = ui.allocate_exact_size(
+                                            egui::vec2(ui.available_width(), 32.0),
+                                            egui::Sense::click(),
+                                        );
+                                        let fill = if selected {
+                                            C_RAISED2
+                                        } else if resp.hovered() {
+                                            C_ACCENT.linear_multiply(0.15)
+                                        } else {
+                                            egui::Color32::TRANSPARENT
+                                        };
+                                        ui.painter().rect_filled(rect, 6.0, fill);
+                                        ui.painter().text(
+                                            rect.left_center() + egui::vec2(10.0, 0.0),
+                                            egui::Align2::LEFT_CENTER,
+                                            if selected { "✓ Off" } else { "Off" },
+                                            egui::FontId::proportional(13.0),
+                                            if selected { C_TEXT } else { C_MUTED },
+                                        );
+                                        if resp.clicked() {
+                                            let _ = self
+                                                .player_mut()
+                                                .mpv()
+                                                .command("set", &["sid", "no"]);
+                                            for tr in &mut self.subtitle_tracks {
+                                                tr.selected = false;
+                                            }
+                                        }
+                                        ui.add_space(4.0);
+                                    }
                                     for t in self.subtitle_tracks.clone() {
                                         let label = if t.selected {
                                             format!("✓ {}", t.label)
@@ -161,6 +196,40 @@ impl AmminiApp {
                                             }
                                         }
                                         ui.add_space(4.0);
+                                    }
+                                    ui.add_space(6.0);
+                                    let (rect, resp) = ui.allocate_exact_size(
+                                        egui::vec2(ui.available_width(), 32.0),
+                                        egui::Sense::click(),
+                                    );
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        6.0,
+                                        if resp.hovered() {
+                                            C_ACCENT.linear_multiply(0.15)
+                                        } else {
+                                            egui::Color32::TRANSPARENT
+                                        },
+                                    );
+                                    ui.painter().text(
+                                        rect.left_center() + egui::vec2(10.0, 0.0),
+                                        egui::Align2::LEFT_CENTER,
+                                        "+ Add subtitle file…",
+                                        egui::FontId::proportional(13.0),
+                                        C_MUTED,
+                                    );
+                                    if resp.clicked() {
+                                        let paths = FileDialog::new()
+                                            .add_filter(
+                                                "Subtitles",
+                                                &["srt", "vtt", "ass", "ssa", "sub", "sup"],
+                                            )
+                                            .pick_files();
+                                        if let Some(paths) = paths {
+                                            let mpv = self.player_mut().mpv();
+                                            let _ = subtitles::add_subtitle_files(mpv, &paths);
+                                            self.track_refresh_pending = true;
+                                        }
                                     }
                                 }
                                 "settings" => {
@@ -279,7 +348,7 @@ impl AmminiApp {
                 .order(egui::Order::Tooltip)
                 .pivot(egui::Align2::LEFT_BOTTOM)
                 .fixed_pos(egui::pos2(btn_rect.left(), btn_rect.top() - 4.0))
-                .show(&ctx, |ui| {
+                .show(ctx, |ui| {
                     egui::Frame::new()
                         .fill(C_RAISED)
                         .stroke(egui::Stroke::new(1.0, C_BORDER2))
@@ -335,7 +404,7 @@ impl AmminiApp {
                 .order(egui::Order::Tooltip)
                 .pivot(egui::Align2::LEFT_BOTTOM)
                 .fixed_pos(egui::pos2(btn_rect.left(), btn_rect.top() - 4.0))
-                .show(&ctx, |ui| {
+                .show(ctx, |ui| {
                     egui::Frame::new()
                         .fill(C_RAISED)
                         .stroke(egui::Stroke::new(1.0, C_BORDER2))
@@ -348,6 +417,43 @@ impl AmminiApp {
                             egui::ScrollArea::vertical()
                                 .max_height(200.0)
                                 .show(ui, |ui| {
+                                    {
+                                        let selected =
+                                            !self.subtitle_tracks.iter().any(|t| t.selected);
+                                        let (rect, resp) = ui.allocate_exact_size(
+                                            egui::vec2(ui.available_width(), 28.0),
+                                            egui::Sense::click(),
+                                        );
+                                        let fill = if selected {
+                                            C_RAISED2
+                                        } else if resp.hovered() {
+                                            C_ACCENT.linear_multiply(0.15)
+                                        } else {
+                                            egui::Color32::TRANSPARENT
+                                        };
+                                        ui.painter().rect_filled(rect, 4.0, fill);
+                                        ui.painter().text(
+                                            rect.left_center() + egui::vec2(8.0, 0.0),
+                                            egui::Align2::LEFT_CENTER,
+                                            if selected { "✓ Off" } else { "Off" },
+                                            egui::FontId::proportional(12.0),
+                                            if selected { C_TEXT } else { C_MUTED },
+                                        );
+                                        if resp.hovered() {
+                                            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                                        }
+                                        if resp.clicked() {
+                                            let _ = self
+                                                .player_mut()
+                                                .mpv()
+                                                .command("set", &["sid", "no"]);
+                                            for tr in &mut self.subtitle_tracks {
+                                                tr.selected = false;
+                                            }
+                                            self.subs_menu_open = false;
+                                        }
+                                        ui.add_space(2.0);
+                                    }
                                     for t in self.subtitle_tracks.clone() {
                                         let label = if t.selected {
                                             format!("✓ {}", t.label)
@@ -389,6 +495,67 @@ impl AmminiApp {
                                         ui.add_space(2.0);
                                     }
                                 });
+                            ui.add_space(4.0);
+                            ui.separator();
+                            // Add subtitle file row
+                            let (rect, resp) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), 28.0),
+                                egui::Sense::click(),
+                            );
+                            ui.painter().rect_filled(
+                                rect,
+                                4.0,
+                                if resp.hovered() {
+                                    C_ACCENT.linear_multiply(0.15)
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                },
+                            );
+                            ui.painter().text(
+                                rect.left_center() + egui::vec2(8.0, 0.0),
+                                egui::Align2::LEFT_CENTER,
+                                "+ Add subtitle file…",
+                                egui::FontId::proportional(12.0),
+                                C_MUTED,
+                            );
+                            if resp.hovered() {
+                                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            if resp.clicked() {
+                                let paths = FileDialog::new()
+                                    .add_filter(
+                                        "Subtitles",
+                                        &["srt", "vtt", "ass", "ssa", "sub", "sup"],
+                                    )
+                                    .pick_files();
+                                if let Some(paths) = paths {
+                                    let mpv = self.player_mut().mpv();
+                                    match subtitles::add_subtitle_files(mpv, &paths) {
+                                        Ok(()) => {
+                                            self.track_refresh_pending = true;
+                                            self.subtitle_error = None;
+                                            if let Some(path) = self.fsm.current_media.clone() {
+                                                let persistent =
+                                                    unsafe { &mut self.fsm.inner_mut().persistent };
+                                                persistent.subtitle_paths.insert(
+                                                    path,
+                                                    paths
+                                                        .iter()
+                                                        .map(|p| p.to_string_lossy().to_string())
+                                                        .collect(),
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            self.subtitle_error = Some(e);
+                                        }
+                                    }
+                                }
+                                self.subs_menu_open = false;
+                            }
+                            if let Some(err) = &self.subtitle_error {
+                                ui.label(egui::RichText::new(err).color(C_MUTED).size(10.0));
+                            }
                         });
                 });
         }
@@ -400,7 +567,7 @@ impl AmminiApp {
                 .order(egui::Order::Tooltip)
                 .pivot(egui::Align2::LEFT_BOTTOM)
                 .fixed_pos(egui::pos2(btn_rect.left(), btn_rect.top() - 4.0))
-                .show(&ctx, |ui| {
+                .show(ctx, |ui| {
                     egui::Frame::new()
                         .fill(C_RAISED)
                         .stroke(egui::Stroke::new(1.0, C_BORDER2))

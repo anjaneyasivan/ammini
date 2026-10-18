@@ -53,6 +53,9 @@ pub struct PersistentState {
     /// Playback speed (mpv units), applied at startup and on media load.
     #[serde(default = "default_playback_speed")]
     pub playback_speed: f64,
+    /// Subtitle files added for a given media path.
+    #[serde(default)]
+    pub subtitle_paths: HashMap<String, Vec<String>>,
 }
 
 fn default_playback_speed() -> f64 {

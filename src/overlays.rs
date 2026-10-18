@@ -541,26 +541,43 @@ impl AmminiApp {
                                     )
                                     .pick_files();
                                 if let Some(paths) = paths {
-                                    let mpv = self.player_mut().mpv();
-                                    match subtitles::add_subtitle_files(mpv, &paths) {
-                                        Ok(()) => {
-                                            self.track_refresh_pending = true;
-                                            self.subtitle_error = None;
-                                            if let Some(path) = self.fsm.current_media.clone() {
-                                                let persistent =
-                                                    unsafe { &mut self.fsm.inner_mut().persistent };
-                                                persistent.subtitle_paths.insert(
-                                                    path,
-                                                    paths
-                                                        .iter()
-                                                        .map(|p| p.to_string_lossy().to_string())
-                                                        .collect(),
-                                                );
+                                    let new_paths: Vec<_> = paths
+                                        .into_iter()
+                                        .filter(|p| {
+                                            !self.added_subtitle_paths.iter().any(|a| a == p)
+                                        })
+                                        .collect();
+                                    if new_paths.is_empty() {
+                                        self.subs_menu_open = false;
+                                    } else {
+                                        let mpv = self.player_mut().mpv();
+                                        match subtitles::add_subtitle_files(mpv, &new_paths) {
+                                            Ok(()) => {
+                                                self.track_refresh_pending = true;
+                                                self.subtitle_error = None;
+                                                self.added_subtitle_paths.extend(new_paths.clone());
+                                                if let Some(path) = self.fsm.current_media.clone() {
+                                                    let persistent = unsafe {
+                                                        &mut self.fsm.inner_mut().persistent
+                                                    };
+                                                    let mut all = self.added_subtitle_paths.clone();
+                                                    all.sort();
+                                                    all.dedup();
+                                                    persistent.subtitle_paths.insert(
+                                                        path,
+                                                        all.iter()
+                                                            .map(|p| {
+                                                                p.to_string_lossy().to_string()
+                                                            })
+                                                            .collect(),
+                                                    );
+                                                }
+                                            }
+                                            Err(e) => {
+                                                self.subtitle_error = Some(e);
                                             }
                                         }
-                                        Err(e) => {
-                                            self.subtitle_error = Some(e);
-                                        }
+                                        self.subs_menu_open = false;
                                     }
                                 }
                                 self.subs_menu_open = false;

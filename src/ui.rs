@@ -306,6 +306,7 @@ impl App for AmminiApp {
             ) {
                 self.byte_time_map = ammini::telegram::cache::ByteTimeMap::default();
                 self.byte_time_record_last = None;
+                self.added_subtitle_paths.clear();
                 let speed = self.playback_speed;
                 let _ = self.player_mut().mpv().set_property("speed", speed);
             }
@@ -328,19 +329,27 @@ impl App for AmminiApp {
         if !self.pending_subtitle_paths.is_empty()
             && matches!(self.fsm.state(), ammini::fsm::FsmState::Playing { .. })
         {
-            let paths = std::mem::take(&mut self.pending_subtitle_paths);
-            let mpv = self.player_mut().mpv();
-            let _ = ammini::subtitles::add_subtitle_files(mpv, &paths);
-            self.track_refresh_pending = true;
-            if let Some(path) = self.fsm.current_media.clone() {
-                let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
-                persistent.subtitle_paths.insert(
-                    path,
-                    paths
-                        .iter()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .collect(),
-                );
+            let paths: Vec<_> = std::mem::take(&mut self.pending_subtitle_paths)
+                .into_iter()
+                .filter(|p| !self.added_subtitle_paths.iter().any(|a| a == p))
+                .collect();
+            if !paths.is_empty() {
+                let mpv = self.player_mut().mpv();
+                let _ = ammini::subtitles::add_subtitle_files(mpv, &paths);
+                self.track_refresh_pending = true;
+                self.added_subtitle_paths.extend(paths.clone());
+                if let Some(path) = self.fsm.current_media.clone() {
+                    let persistent = unsafe { &mut self.fsm.inner_mut().persistent };
+                    let mut all = self.added_subtitle_paths.clone();
+                    all.sort();
+                    all.dedup();
+                    persistent.subtitle_paths.insert(
+                        path,
+                        all.iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect(),
+                    );
+                }
             }
         }
         // VideoReady handling from drained messages needs OpenTelegramUrl event; handle via telegram fsm data?

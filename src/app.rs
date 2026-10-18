@@ -62,6 +62,7 @@ pub struct AmminiApp {
     pub settings_menu_open: bool,
     pub volume_popup_hovered: bool,
     pub track_refresh_pending: bool,
+    pub added_subtitle_paths: Vec<std::path::PathBuf>,
     pub pending_subtitle_paths: Vec<std::path::PathBuf>,
     pub subtitle_error: Option<String>,
     pub playback_speed: f64,
@@ -175,6 +176,7 @@ impl AmminiApp {
             settings_menu_open: false,
             volume_popup_hovered: false,
             track_refresh_pending: false,
+            added_subtitle_paths: Vec::new(),
             pending_subtitle_paths: Vec::new(),
             subtitle_error: None,
             playback_speed,
@@ -212,6 +214,9 @@ impl AmminiApp {
         let mut subs: Vec<std::path::PathBuf> = Vec::new();
         for p in dropped {
             if ammini::subtitles::is_subtitle_path(&p) {
+                if self.added_subtitle_paths.iter().any(|a| a == &p) {
+                    continue;
+                }
                 subs.push(p);
             } else if video.is_none() {
                 video = Some(p);
@@ -219,6 +224,7 @@ impl AmminiApp {
         }
         if let Some(v) = video {
             events.push(PlayerEvent::OpenFile(v.to_string_lossy().to_string()));
+            self.added_subtitle_paths.clear();
             self.pending_subtitle_paths = subs;
         } else if !subs.is_empty() {
             // No video in the drop: apply now if something is playing, else queue.
@@ -373,6 +379,7 @@ impl AmminiApp {
         }
         let mut audio_tracks = Vec::new();
         let mut subtitle_tracks = Vec::new();
+        let mut seen_ext_subs: std::collections::HashSet<String> = std::collections::HashSet::new();
         let count = {
             let mpv = self.player_mut().mpv();
             let count: i64 = mpv.get_property("track-list/count").unwrap_or(0);
@@ -402,6 +409,9 @@ impl AmminiApp {
                 } else {
                     base_label
                 };
+                if external && kind == "sub" && !seen_ext_subs.insert(label.clone()) {
+                    continue;
+                }
                 let label = if kind == "sub" && label.chars().count() > 80 {
                     let mut s: String = label.chars().take(79).collect();
                     s.push('…');

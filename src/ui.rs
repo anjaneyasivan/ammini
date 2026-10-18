@@ -120,10 +120,12 @@ impl App for AmminiApp {
             &ctx,
             &self.icon_cache,
             self.nav_rail_open,
-            &mut self.active_tab,
-            &mut self.chats_open,
-            &mut self.show_telegram,
-            &mut self.settings_menu_open,
+            crate::left_sidebar::NavState {
+                active_tab: &mut self.active_tab,
+                chats_open: &mut self.chats_open,
+                show_telegram: &mut self.show_telegram,
+                settings_menu_open: &mut self.settings_menu_open,
+            },
         );
 
         self.render_settings_menu(&ctx);
@@ -181,27 +183,26 @@ impl App for AmminiApp {
         if ctx.input(|i| {
             i.pointer
                 .button_double_clicked(egui::PointerButton::Primary)
-        }) {
-            if let Some(pos) = ctx.pointer_interact_pos() {
-                const UI_LAYERS: [&str; 10] = [
-                    "hud",
-                    "top_header",
-                    "volume_popup",
-                    "speed_menu",
-                    "subs_menu",
-                    "audio_menu",
-                    "settings_menu",
-                    "chats_overlay",
-                    "inspector_overlay",
-                    "hud_scrim",
-                ];
-                let over_ui = ctx
-                    .layer_id_at(pos)
-                    .is_some_and(|l| UI_LAYERS.iter().any(|n| l.id == egui::Id::new(*n)));
-                let in_video = video_rect.contains(pos) && pos.y >= 40.0;
-                if in_video && !over_ui && !self.show_url_dialog {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
-                }
+        }) && let Some(pos) = ctx.pointer_interact_pos()
+        {
+            const UI_LAYERS: [&str; 10] = [
+                "hud",
+                "top_header",
+                "volume_popup",
+                "speed_menu",
+                "subs_menu",
+                "audio_menu",
+                "settings_menu",
+                "chats_overlay",
+                "inspector_overlay",
+                "hud_scrim",
+            ];
+            let over_ui = ctx
+                .layer_id_at(pos)
+                .is_some_and(|l| UI_LAYERS.iter().any(|n| l.id == egui::Id::new(*n)));
+            let in_video = video_rect.contains(pos) && pos.y >= 40.0;
+            if in_video && !over_ui && !self.show_url_dialog {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
             }
         }
         // Drop hint while files are being dragged over the window.
@@ -239,10 +240,10 @@ impl App for AmminiApp {
             .unwrap_or(false);
         let is_paused = self.player_mut().paused().unwrap_or(true);
         if hovered {
-            if let Some(pos) = ctx.pointer_hover_pos() {
-                if self.hud_hover.map(|(_, prev)| prev != pos).unwrap_or(true) {
-                    self.hud_hover = Some((std::time::Instant::now(), pos));
-                }
+            if let Some(pos) = ctx.pointer_hover_pos()
+                && self.hud_hover.map(|(_, prev)| prev != pos).unwrap_or(true)
+            {
+                self.hud_hover = Some((std::time::Instant::now(), pos));
             }
         } else {
             self.hud_hover = None;
@@ -269,7 +270,6 @@ impl App for AmminiApp {
             crate::top_bar::show(
                 &ctx,
                 &mut self.nav_rail_open,
-                &mut self.chats_open,
                 &mut self.inspector_open,
                 hud_alpha,
             );
@@ -278,16 +278,14 @@ impl App for AmminiApp {
         self.paint_scrim(&ctx, video_rect, hud_alpha, show_hud);
 
         if show_hud {
-            self.render_hud(
-                ui,
-                &ctx,
-                video_rect,
-                &cache_spans,
+            self.render_hud(crate::hud::HudParams {
+                ctx: &ctx,
+                cache_spans: &cache_spans,
                 hud_alpha,
                 show_hud,
                 is_paused,
                 is_fullscreen,
-            );
+            });
         }
         if self.chats_open {
             self.render_chats_overlay(ui, &ctx, video_rect);
@@ -350,12 +348,11 @@ impl App for AmminiApp {
 
         if (self.audio_menu_open || self.subs_menu_open || self.speed_menu_open)
             && self.frame_count > self.menu_opened_frame
+            && ctx.input(|i| i.pointer.any_click())
         {
-            if ctx.input(|i| i.pointer.any_click()) {
-                self.audio_menu_open = false;
-                self.subs_menu_open = false;
-                self.speed_menu_open = false;
-            }
+            self.audio_menu_open = false;
+            self.subs_menu_open = false;
+            self.speed_menu_open = false;
         }
         self.poll_seek();
         self.update_display_sleep();

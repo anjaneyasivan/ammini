@@ -6,16 +6,27 @@ use std::sync::{Arc, Mutex};
 
 /// Renders the left nav rail into `ui` when `open` is true. Updates the active tab
 /// and panel visibility flags in place.
+/// Mutable navigation state passed into the nav rail.
+pub struct NavState<'a> {
+    pub active_tab: &'a mut &'static str,
+    pub chats_open: &'a mut bool,
+    pub show_telegram: &'a mut bool,
+    pub settings_menu_open: &'a mut bool,
+}
+
 pub fn show(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     icon_cache: &Arc<Mutex<IconCache>>,
     open: bool,
-    active_tab: &mut &'static str,
-    chats_open: &mut bool,
-    show_telegram: &mut bool,
-    settings_menu_open: &mut bool,
+    state: NavState<'_>,
 ) {
+    let NavState {
+        active_tab,
+        chats_open,
+        show_telegram,
+        settings_menu_open,
+    } = state;
     if !open {
         return;
     }
@@ -55,7 +66,18 @@ pub fn show(
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
                         egui::Layout::centered_and_justified(egui::Direction::TopDown),
                     ));
-                    if iconify_icon(&mut child, icon_cache, ctx, pfx, name, "#ffffff", 20, None) {
+                    if iconify_icon(
+                        &mut child,
+                        icon_cache,
+                        ctx,
+                        crate::iconify::IconSpec {
+                            prefix: pfx,
+                            name,
+                            color: "#ffffff",
+                            size: 20,
+                            bg: None,
+                        },
+                    ) {
                         clicked = true;
                     }
                     if clicked || response.clicked() {
@@ -74,11 +96,13 @@ pub fn show(
                     ui,
                     icon_cache,
                     ctx,
-                    "keyline-icons",
-                    "settings-fill",
-                    "#ffffff",
-                    20,
-                    None,
+                    crate::iconify::IconSpec {
+                        prefix: "keyline-icons",
+                        name: "settings-fill",
+                        color: "#ffffff",
+                        size: 20,
+                        bg: None,
+                    },
                 ) {
                     *settings_menu_open = !*settings_menu_open;
                 }

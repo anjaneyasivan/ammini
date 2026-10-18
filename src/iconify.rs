@@ -55,23 +55,23 @@ impl IconCache {
                 IconState::Failed(e) => return IconState::Failed(e),
                 IconState::Loading => {
                     let path = self.cache_path(&key);
-                    if let Ok(bytes) = std::fs::read(&path) {
-                        if !bytes.is_empty() {
-                            self.entries.insert(key, IconState::Ready(bytes.clone()));
-                            return IconState::Ready(bytes);
-                        }
+                    if let Ok(bytes) = std::fs::read(&path)
+                        && !bytes.is_empty()
+                    {
+                        self.entries.insert(key, IconState::Ready(bytes.clone()));
+                        return IconState::Ready(bytes);
                     }
                     return IconState::Loading;
                 }
             }
         }
         let path = self.cache_path(&key);
-        if let Ok(bytes) = std::fs::read(&path) {
-            if !bytes.is_empty() {
-                self.entries
-                    .insert(key.clone(), IconState::Ready(bytes.clone()));
-                return IconState::Ready(bytes);
-            }
+        if let Ok(bytes) = std::fs::read(&path)
+            && !bytes.is_empty()
+        {
+            self.entries
+                .insert(key.clone(), IconState::Ready(bytes.clone()));
+            return IconState::Ready(bytes);
         }
         self.entries.insert(key.clone(), IconState::Loading);
         let ctx = ctx.clone();
@@ -85,10 +85,11 @@ impl IconCache {
             let out = std::process::Command::new("curl")
                 .args(["-sS", "-L", &url])
                 .output();
-            if let Ok(o) = out {
-                if o.status.success() && !o.stdout.is_empty() {
-                    let _ = std::fs::write(cache_dir.join(format!("{key2}.svg")), &o.stdout);
-                }
+            if let Ok(o) = out
+                && o.status.success()
+                && !o.stdout.is_empty()
+            {
+                let _ = std::fs::write(cache_dir.join(format!("{key2}.svg")), &o.stdout);
             }
             ctx.request_repaint();
         });
@@ -96,16 +97,26 @@ impl IconCache {
     }
 }
 
+/// Specification for an iconified image.
+pub struct IconSpec<'a> {
+    pub prefix: &'a str,
+    pub name: &'a str,
+    pub color: &'a str,
+    pub size: u32,
+    pub bg: Option<egui::Color32>,
+}
+
 pub fn iconify_icon(
     ui: &mut egui::Ui,
     cache: &Arc<Mutex<IconCache>>,
     ctx: &egui::Context,
-    prefix: &str,
-    name: &str,
-    color: &str,
-    size: u32,
-    bg: Option<egui::Color32>,
+    spec: IconSpec<'_>,
 ) -> bool {
+    let prefix = spec.prefix;
+    let name = spec.name;
+    let color = spec.color;
+    let size = spec.size;
+    let bg = spec.bg;
     let state = {
         let mut c = cache.lock().unwrap();
         c.state(ctx, prefix, name, color, size)

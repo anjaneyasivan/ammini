@@ -3,14 +3,8 @@ use crate::theme::{C_ACCENT, C_DIM, C_RAISED, C_RAISED2, C_TEXT};
 use eframe::egui;
 
 /// Renders the top-right action buttons. Toggles the passed-in flags in place.
-pub fn show(
-    ctx: &egui::Context,
-    nav_rail_open: &mut bool,
-    chats_open: &mut bool,
-    inspector_open: &mut bool,
-    alpha: f32,
-) {
-    let bar_w = 220.0;
+pub fn show(ctx: &egui::Context, nav_rail_open: &mut bool, inspector_open: &mut bool, alpha: f32) {
+    let bar_w = 160.0;
     let vr = ctx.viewport_rect();
     egui::Area::new("top_header".into())
         .order(egui::Order::Tooltip)
@@ -27,7 +21,6 @@ pub fn show(
                             ammini::icons::ICON_KL_CIRCLE_MENU_FILL,
                             *nav_rail_open,
                         ),
-                        ("chat", ammini::icons::ICON_KL_SEND_FILL, *chats_open),
                         ("insp", ammini::icons::ICON_KL_INFO_FILL, *inspector_open),
                     ] {
                         let icon_bytes = icon.1;
@@ -62,7 +55,6 @@ pub fn show(
                         if btn.clicked() {
                             match id {
                                 "nav" => *nav_rail_open = !*nav_rail_open,
-                                "chat" => *chats_open = !*chats_open,
                                 "insp" => *inspector_open = !*inspector_open,
                                 _ => {}
                             }

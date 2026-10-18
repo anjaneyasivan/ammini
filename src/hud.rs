@@ -2,6 +2,16 @@ use crate::app::AmminiApp;
 use crate::theme::*;
 use eframe::egui;
 
+/// Parameters for rendering the HUD.
+pub struct HudParams<'a> {
+    pub ctx: &'a egui::Context,
+    pub cache_spans: &'a [(f64, f64)],
+    pub hud_alpha: f32,
+    pub show_hud: bool,
+    pub is_paused: bool,
+    pub is_fullscreen: bool,
+}
+
 impl AmminiApp {
     pub fn paint_scrim(
         &self,
@@ -34,17 +44,13 @@ impl AmminiApp {
         }
     }
 
-    pub fn render_hud(
-        &mut self,
-        _ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        _video_rect: egui::Rect,
-        cache_spans: &[(f64, f64)],
-        hud_alpha: f32,
-        show_hud: bool,
-        is_paused: bool,
-        is_fullscreen: bool,
-    ) {
+    pub fn render_hud(&mut self, params: HudParams<'_>) {
+        let ctx = params.ctx;
+        let cache_spans = params.cache_spans;
+        let hud_alpha = params.hud_alpha;
+        let show_hud = params.show_hud;
+        let is_paused = params.is_paused;
+        let is_fullscreen = params.is_fullscreen;
         if !show_hud {
             return;
         }
@@ -426,12 +432,11 @@ impl AmminiApp {
                                 );
                             }
                         }
-                        if tl_resp.clicked() || tl_resp.dragged() {
-                            if let Some(p) = tl_resp.interact_pointer_pos() {
-                                let frac =
-                                    ((p.x - tl_rect.min.x) / tl_rect.width()).clamp(0.0, 1.0);
-                                let _ = self.player_mut().seek_to(frac as f64 * dur);
-                            }
+                        if (tl_resp.clicked() || tl_resp.dragged())
+                            && let Some(p) = tl_resp.interact_pointer_pos()
+                        {
+                            let frac = ((p.x - tl_rect.min.x) / tl_rect.width()).clamp(0.0, 1.0);
+                            let _ = self.player_mut().seek_to(frac as f64 * dur);
                         }
                         ui.add_space(8.0);
                     });

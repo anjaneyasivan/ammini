@@ -74,6 +74,7 @@ pub struct TelegramData {
     pub has_more_dialogs: bool,
     pub has_more_messages: bool,
     pub dialog_filter: String,
+    pub message_filter: String,
     pub search_query: String,
     pub search_results: Vec<SearchResult>,
     pub search_loading: bool,
@@ -488,7 +489,7 @@ mod tests {
     };
     use crate::telegram::MediaMeta;
     use crate::telegram::UiMessage;
-    use crate::telegram::client::{DialogInfo, MessageInfo, PeerRef, SearchResult};
+    use crate::telegram::client::{DialogInfo, MessageInfo, PeerRef};
     use grammers_session::types::{PeerAuth, PeerId};
     use statig::prelude::IntoStateMachineExt;
 

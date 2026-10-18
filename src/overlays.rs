@@ -99,14 +99,13 @@ impl AmminiApp {
                                                     egui::FontId::monospace(10.0),
                                                     C_MUTED,
                                                 );
-                                                if resp.clicked() {
-                                                    if let Some(bg) = &self.bg_tx {
-                                                        let _ =
-                                                            bg.send(BgCommand::PlayTelegramVideo {
-                                                                peer: entry.peer,
-                                                                msg_id: entry.msg_id,
-                                                            });
-                                                    }
+                                                if resp.clicked()
+                                                    && let Some(bg) = &self.bg_tx
+                                                {
+                                                    let _ = bg.send(BgCommand::PlayTelegramVideo {
+                                                        peer: entry.peer,
+                                                        msg_id: entry.msg_id,
+                                                    });
                                                 }
                                             }
                                         });
@@ -193,13 +192,12 @@ impl AmminiApp {
                                         if resp.hovered() {
                                             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
                                         }
-                                        if resp.clicked() {
-                                            if let Ok(()) =
+                                        if resp.clicked()
+                                            && let Ok(()) =
                                                 self.player_mut().mpv().set_property("sid", t.id)
-                                            {
-                                                for tr in &mut self.subtitle_tracks {
-                                                    tr.selected = tr.id == t.id;
-                                                }
+                                        {
+                                            for tr in &mut self.subtitle_tracks {
+                                                tr.selected = tr.id == t.id;
                                             }
                                         }
                                         ui.add_space(4.0);
@@ -336,7 +334,7 @@ impl AmminiApp {
                 lines
             };
             let dismiss = right_sidebar::show(
-                &ctx,
+                ctx,
                 proxy_url.as_deref(),
                 pos_line,
                 &info_lines,

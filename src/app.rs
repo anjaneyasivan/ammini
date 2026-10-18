@@ -298,13 +298,12 @@ impl AmminiApp {
                 let _ = self.player_mut().seek_relative(-10.0);
             }
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift) {
-            if let Some(path) = FileDialog::new()
+        if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift)
+            && let Some(path) = FileDialog::new()
                 .add_filter("Video files", VIDEO_EXTS)
                 .pick_file()
-            {
-                events.push(PlayerEvent::OpenFile(path.to_string_lossy().to_string()));
-            }
+        {
+            events.push(PlayerEvent::OpenFile(path.to_string_lossy().to_string()));
         }
         if ctx.input(|i| i.key_pressed(egui::Key::U) && i.modifiers.command) {
             self.show_url_dialog = true;
